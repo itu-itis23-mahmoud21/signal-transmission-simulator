@@ -373,7 +373,7 @@ if mode == "Digital → Digital":
 elif mode == "Digital → Analog":
     with st.sidebar:
         st.subheader("Technique")
-        scheme = st.selectbox("Modulation", ["ASK", "BFSK", "BPSK", "QPSK", "16QAM"])
+        scheme = st.selectbox("Modulation", ["ASK", "BFSK", "MFSK", "BPSK", "QPSK", "16QAM"])
 
         st.subheader("Technique parameters")
         kwargs = {}
@@ -395,7 +395,97 @@ elif mode == "Digital → Analog":
                 # invalid_params = True
 
         if scheme == "BFSK":
-            kwargs["tone_sep"] = st.slider("Tone separation (in 1/Tb units)", 0.5, 6.0, 2.0, step=0.5)
+            nyq = float(params.fs) / 2.0
+
+            # Max deviation so both tones stay within (0, Nyquist)
+            dev_max = min(fc - 0.1, nyq - fc - 0.1)
+
+            if dev_max <= 0:
+                st.error("BFSK invalid: fc is too close to 0 or Nyquist for any symmetric tones.")
+                invalid_params = True
+                dev_max = 0.1
+
+            # Session defaults
+            if "bfsk_dev" not in st.session_state:
+                st.session_state["bfsk_dev"] = float(min(2.0 / Tb, 0.8 * dev_max)) if dev_max > 0 else 0.5
+
+            # Keep derived tones in state too (so widgets can bind to them)
+            if "bfsk_f0" not in st.session_state or "bfsk_f1" not in st.session_state:
+                d = float(st.session_state["bfsk_dev"])
+                st.session_state["bfsk_f0"] = float(fc - d)
+                st.session_state["bfsk_f1"] = float(fc + d)
+
+            def _sync_from_f0():
+                f0 = float(st.session_state["bfsk_f0"])
+                d = abs(float(fc) - f0)
+                d = min(max(d, 0.0), float(dev_max))
+                st.session_state["bfsk_dev"] = d
+                st.session_state["bfsk_f0"] = float(fc - d)
+                st.session_state["bfsk_f1"] = float(fc + d)
+
+            def _sync_from_f1():
+                f1 = float(st.session_state["bfsk_f1"])
+                d = abs(f1 - float(fc))
+                d = min(max(d, 0.0), float(dev_max))
+                st.session_state["bfsk_dev"] = d
+                st.session_state["bfsk_f0"] = float(fc - d)
+                st.session_state["bfsk_f1"] = float(fc + d)
+
+            st.caption("Book convention: f0 = fc − Δf and f1 = fc + Δf (symmetric around fc).")
+
+            st.number_input(
+                "f0 (Hz) for binary 0",
+                min_value=0.1,
+                max_value=float(nyq - 0.1),
+                key="bfsk_f0",
+                on_change=_sync_from_f0,
+            )
+            st.number_input(
+                "f1 (Hz) for binary 1",
+                min_value=0.1,
+                max_value=float(nyq - 0.1),
+                key="bfsk_f1",
+                on_change=_sync_from_f1,
+            )
+
+            st.text_input(
+                "Derived deviation Δf = |f1 − fc| = |fc − f0| (Hz)",
+                value=f"{float(st.session_state['bfsk_dev']):.6g}",
+                disabled=True,
+            )
+
+            kwargs["f0"] = float(st.session_state["bfsk_f0"])
+            kwargs["f1"] = float(st.session_state["bfsk_f1"])
+
+            if np.isclose(kwargs["f0"], kwargs["f1"]):
+                st.error("Invalid BFSK: f0 and f1 cannot be equal.")
+                invalid_params = True
+
+        if scheme == "MFSK":
+            nyq = float(params.fs) / 2.0
+
+            L = st.select_slider("Bits per symbol (L)", options=[2, 3, 4], value=2)
+            M = 2 ** int(L)
+            st.text_input("Derived number of tones M = 2^L", value=str(M), disabled=True)
+
+            # Keep all tones within (0, Nyquist): fc ± (M-1)*fd
+            fd_max = min((fc - 0.1) / (M - 1), (nyq - fc - 0.1) / (M - 1))
+            if fd_max <= 0:
+                st.error("MFSK invalid: fc is too close to 0 or Nyquist for the selected M.")
+                invalid_params = True
+                fd_max = 0.1
+
+            fd_default = min(1.0 / Tb, 0.5 * fd_max)
+
+            fd = st.slider("Frequency difference fd (Hz)", 0.1, float(fd_max), float(fd_default), step=0.1)
+
+            # Show the tone set (optional)
+            freqs = [fc + (2 * (i + 1) - 1 - M) * fd for i in range(M)]
+            with st.expander("Show MFSK tone frequencies"):
+                st.write(freqs)
+
+            kwargs["L"] = int(L)
+            kwargs["fd"] = float(fd)
 
         current_sig = make_signature(
             "d2a", params,

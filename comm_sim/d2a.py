@@ -151,9 +151,21 @@ def modulate(bits: List[int], scheme: str, params: SimParams, **kwargs) -> Tuple
         return s, meta
 
     if scheme == "BFSK":
-        tone_sep = float(kwargs.get("tone_sep", 2.0))  # in 1/Tb units
-        f0 = fc - tone_sep / Tb
-        f1 = fc + tone_sep / Tb
+        # Preferred: explicit f0/f1 (Hz) from UI
+        if "f0" in kwargs and "f1" in kwargs:
+            f0 = float(kwargs["f0"])
+            f1 = float(kwargs["f1"])
+            tone_sep = None
+        else:
+            # Backward compatible: tone_sep in (1/Tb units) as before
+            tone_sep = float(kwargs.get("tone_sep", 2.0))
+            f0 = fc - tone_sep / Tb
+            f1 = fc + tone_sep / Tb
+
+        # Basic sanity: avoid swapped frequencies
+        if f1 < f0:
+            f0, f1 = f1, f0
+
         warnings += _warn_params(params, extra_freqs=[f0, f1])
 
         s = np.zeros(N, dtype=float)
@@ -165,7 +177,69 @@ def modulate(bits: List[int], scheme: str, params: SimParams, **kwargs) -> Tuple
             seg_t = t[a:z]
             s[a:z] = Ac * np.cos(2 * np.pi * f * seg_t)
 
-        meta.update({"tone_sep": tone_sep, "f0": f0, "f1": f1, "f_used": freqs, "warnings": warnings})
+        meta.update({
+            "tone_sep": tone_sep,
+            "f0": f0,
+            "f1": f1,
+            "f_used": freqs,
+            "warnings": warnings
+        })
+        return s, meta
+    
+    if scheme == "MFSK":
+        # MFSK parameters (Eq 5.4):
+        #   M = 2^L, symbol holds L bits, Ts = L*Tb
+        #   f_i = fc + (2i - 1 - M) * fd,  1 <= i <= M
+        L = int(kwargs.get("L", 2))          # bits per symbol
+        fd = float(kwargs.get("fd", 1.0))    # frequency difference (Hz)
+        if L < 1:
+            raise ValueError("MFSK: L must be >= 1.")
+        M = 2 ** L
+
+        bitsL, pad = _pad_bits(bits, L)
+
+        Ns_sym = L * Ns
+        nsym = len(bitsL) // L
+        Nsym = nsym * Ns_sym
+        tS = make_time_axis(Nsym, fs)
+
+        # Precompute tone set
+        freqs = [fc + (2 * (i + 1) - 1 - M) * fd for i in range(M)]
+        warnings += _warn_params(params, extra_freqs=freqs)
+
+        s = np.zeros(Nsym, dtype=float)
+        sym_bits: List[List[int]] = []
+        sym_index: List[int] = []
+        f_used: List[float] = []
+
+        for k in range(nsym):
+            chunk = bitsL[k * L:(k + 1) * L]
+            sym_bits.append(chunk)
+
+            # Map bits to index i in [0..M-1] (natural binary)
+            idx = 0
+            for b in chunk:
+                idx = (idx << 1) | int(b)
+            sym_index.append(idx)
+
+            f = float(freqs[idx])
+            f_used.append(f)
+
+            a, z = k * Ns_sym, (k + 1) * Ns_sym
+            seg_t = tS[a:z]
+            s[a:z] = Ac * np.cos(2 * np.pi * f * seg_t)
+
+        meta.update({
+            "L": L,
+            "M": M,
+            "fd": fd,
+            "pad_bits": pad,
+            "freqs": freqs,
+            "sym_bits": sym_bits,
+            "sym_index": sym_index,
+            "f_used": f_used,
+            "warnings": warnings
+        })
         return s, meta
 
     if scheme == "BPSK":
@@ -302,9 +376,18 @@ def demodulate(s_t: np.ndarray, scheme: str, params: SimParams, **kwargs) -> Tup
         return bits_out, meta
 
     if scheme == "BFSK":
-        tone_sep = float(kwargs.get("tone_sep", 2.0))
-        f0 = fc - tone_sep / Tb
-        f1 = fc + tone_sep / Tb
+        if "f0" in kwargs and "f1" in kwargs:
+            f0 = float(kwargs["f0"])
+            f1 = float(kwargs["f1"])
+            tone_sep = None
+        else:
+            tone_sep = float(kwargs.get("tone_sep", 2.0))
+            f0 = fc - tone_sep / Tb
+            f1 = fc + tone_sep / Tb
+
+        if f1 < f0:
+            f0, f1 = f1, f0
+
         warnings += _warn_params(params, extra_freqs=[f0, f1])
 
         nbits = N // Ns
@@ -325,7 +408,61 @@ def demodulate(s_t: np.ndarray, scheme: str, params: SimParams, **kwargs) -> Tup
             E1_list.append(float(E1))
             bits_out.append(1 if E1 > E0 else 0)
 
-        meta.update({"tone_sep": tone_sep, "f0": f0, "f1": f1, "E0": E0_list, "E1": E1_list, "warnings": warnings})
+        meta.update({
+            "tone_sep": tone_sep,
+            "f0": f0,
+            "f1": f1,
+            "E0": E0_list,
+            "E1": E1_list,
+            "warnings": warnings
+        })
+        return bits_out, meta
+
+    if scheme == "MFSK":
+        L = int(kwargs.get("L", 2))
+        fd = float(kwargs.get("fd", 1.0))
+        if L < 1:
+            raise ValueError("MFSK: L must be >= 1.")
+        M = 2 ** L
+
+        Ns_sym = L * Ns
+        nsym = N // Ns_sym
+
+        # Tone set
+        freqs = [fc + (2 * (i + 1) - 1 - M) * fd for i in range(M)]
+        warnings += _warn_params(params, extra_freqs=freqs)
+
+        bits_out: List[int] = []
+        chosen_idx: List[int] = []
+        E_list: List[List[float]] = []
+
+        for k in range(nsym):
+            a, z = k * Ns_sym, (k + 1) * Ns_sym
+            seg = s_t[a:z]
+            seg_t = t[a:z]
+
+            energies: List[float] = []
+            for f in freqs:
+                I, Q = _iq_correlator(seg, seg_t, float(f))
+                energies.append(float(I * I + Q * Q))
+
+            idx = int(np.argmax(energies))
+            chosen_idx.append(idx)
+            E_list.append(energies)
+
+            # idx -> L bits (natural binary)
+            for shift in range(L - 1, -1, -1):
+                bits_out.append((idx >> shift) & 1)
+
+        meta.update({
+            "L": L,
+            "M": M,
+            "fd": fd,
+            "freqs": freqs,
+            "chosen_idx": chosen_idx,
+            "energies": E_list,
+            "warnings": warnings
+        })
         return bits_out, meta
 
     if scheme == "BPSK":
