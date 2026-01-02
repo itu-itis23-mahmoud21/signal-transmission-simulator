@@ -334,13 +334,27 @@ elif mode == "Digital → Analog":
 
         st.subheader("Technique parameters")
         kwargs = {}
+        invalid_params = False
+
         if scheme == "ASK":
-            kwargs["A0"] = st.slider("A0", 0.0, 1.0, 0.0, step=0.05)
-            kwargs["A1"] = st.slider("A1", 0.1, 2.0, 1.0, step=0.1)
+            A0 = st.slider("A0", 0.0, 1.0, 0.0, step=0.05)
+            A1 = st.slider("A1", 0.1, 2.0, 1.0, step=0.1)
+            kwargs["A0"] = A0
+            kwargs["A1"] = A1
+
+            # Disallow ambiguous ASK (no amplitude difference)
+            if np.isclose(A0, A1):
+                st.error("Invalid ASK: A0 and A1 cannot be equal (no amplitude difference to detect).")
+                invalid_params = True
+            elif A1 < A0:
+                st.warning("ASK note: A1 < A0 (bit '1' weaker than bit '0'). This is unusual and may confuse users.")
+                # If you want to completely disallow this too, uncomment:
+                # invalid_params = True
+
         if scheme == "BFSK":
             kwargs["tone_sep"] = st.slider("Tone separation (in 1/Tb units)", 0.5, 6.0, 2.0, step=0.5)
 
-        run = st.button("Run simulation", type="primary")
+        run = st.button("Run simulation", type="primary", disabled=invalid_params)
 
     if "d2a_last" not in st.session_state:
         st.session_state["d2a_last"] = None
