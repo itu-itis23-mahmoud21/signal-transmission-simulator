@@ -15,3 +15,25 @@ python -m venv .venv
 # Windows PowerShell
 .\.venv\Scripts\Activate.ps1
 ```
+
+### 2) Install dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+### 3) Start the app
+
+```bash
+streamlit run comm_sim/app.py
+```
+
+### To run the Tests
+
+```bash
+pytest -q
+```
+
+### Notes
+
+This project was developed for BLG 337E (Principles of Computer Communications), and is intended as an educational simulator.
