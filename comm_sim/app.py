@@ -56,7 +56,14 @@ with st.sidebar:
     # For analog carriers / analog modes
     Ac = st.number_input("Carrier amplitude Ac", min_value=0.1, value=1.0, step=0.1)
     cycles_per_bit = st.slider("Carrier cycles per bit (for passband)", 2, 30, 10)
-    fc = cycles_per_bit / Tb
+    fc = float(cycles_per_bit) / float(Tb)
+
+    # Non-editable derived value (updates automatically when Tb or cycles_per_bit changes)
+    st.text_input(
+        "Carrier frequency\nfc = cycles_per_bit / Tb  (Hz)",
+        value=f"{fc:.6g}",
+        disabled=True,
+    )
 
     # Default fs based on digital sampling; analog modes override if needed
     fs = Ns / Tb
@@ -328,7 +335,7 @@ elif mode == "Digital → Analog":
         st.subheader("Technique parameters")
         kwargs = {}
         if scheme == "ASK":
-            kwargs["A0"] = st.slider("A0", 0.0, 1.0, 0.2, step=0.05)
+            kwargs["A0"] = st.slider("A0", 0.0, 1.0, 0.0, step=0.05)
             kwargs["A1"] = st.slider("A1", 0.1, 2.0, 1.0, step=0.1)
         if scheme == "BFSK":
             kwargs["tone_sep"] = st.slider("Tone separation (in 1/Tb units)", 0.5, 6.0, 2.0, step=0.5)
