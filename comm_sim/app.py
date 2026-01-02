@@ -101,6 +101,19 @@ def empty_state(message: str = "Click **Run simulation** from the sidebar to see
         unsafe_allow_html=True,
     )
 
+def make_signature(mode: str, params: SimParams, **kwargs):
+    # Use only JSON-serializable primitives
+    base = {
+        "mode": mode,
+        "fs": float(params.fs),
+        "Tb": float(params.Tb),
+        "Ns": int(params.samples_per_bit),
+        "Ac": float(params.Ac),
+        "fc": float(params.fc),
+    }
+    base.update(kwargs)
+    # Stable ordering
+    return tuple(sorted(base.items()))
 
 if mode in ("Digital → Digital", "Digital → Analog"):
     with st.sidebar:
@@ -111,7 +124,14 @@ if mode in ("Digital → Digital", "Digital → Analog"):
         if "bitstr" not in st.session_state:
             st.session_state["bitstr"] = default_bits
 
-        st.text_input("Bitstring", key="bitstr")
+        def _invalidate_cached_results():
+            for k in ["d2d_last", "d2a_last", "a2d_last", "a2a_last",
+                      "d2d_sig", "d2a_sig", "a2d_sig", "a2a_sig"]:
+                if k in st.session_state:
+                    st.session_state[k] = None
+
+        st.text_input("Bitstring", key="bitstr", on_change=_invalidate_cached_results)
+
 
         st.slider("Random bits N", 8, 256, 32, step=8, key="rand_n")
         st.text_input("Seed (optional)", value="", key="rand_seed")
@@ -121,6 +141,7 @@ if mode in ("Digital → Digital", "Digital → Analog"):
             s = int(seed_txt) if seed_txt else None
             n = int(st.session_state.get("rand_n", 32))
             st.session_state["bitstr"] = bits_to_string(gen_random_bits(n, seed=s))
+            _invalidate_cached_results()
 
         st.button("Generate random bits", on_click=_gen_bits_cb)
 
@@ -185,6 +206,21 @@ if mode == "Digital → Digital":
             hdb3_nonzero_since_violation_init = 0 if opt2 == "Even" else 1
 
         compare_mode = st.checkbox("Compare mode (show multiple)", value=False)
+
+        current_sig = make_signature(
+            "d2d", params,
+            bitstr=bitstr,
+            scheme=scheme,
+            line_amp=float(line_amp),
+            nrzi_start_level=int(nrzi_start_level),
+            diff_start_level=float(diff_start_level),
+            last_pulse_init=int(last_pulse_init),
+            last_zero_pulse_init=int(last_zero_pulse_init),
+            nrzl_prev_level=int(nrzl_prev_level),
+            manchester_prev_bit=int(manchester_prev_bit),
+            hdb3_nonzero_since_violation_init=int(hdb3_nonzero_since_violation_init),
+        )
+
         run = st.button("Run simulation", type="primary")
 
     if "d2d_last" not in st.session_state:
@@ -199,8 +235,15 @@ if mode == "Digital → Digital":
             last_zero_pulse_init=last_zero_pulse_init,
             hdb3_nonzero_since_violation_init=hdb3_nonzero_since_violation_init,
         )
+        st.session_state["d2d_sig"] = current_sig
     
     res = st.session_state.get("d2d_last", None)
+
+    sig = st.session_state.get("d2d_sig", None)
+    if res is not None and sig != current_sig:
+        res = None
+        st.session_state["d2d_last"] = None
+
     if res is None:
         empty_state("Choose a scheme, optionally generate bits, then click **Run simulation**.")
     else:
@@ -354,14 +397,31 @@ elif mode == "Digital → Analog":
         if scheme == "BFSK":
             kwargs["tone_sep"] = st.slider("Tone separation (in 1/Tb units)", 0.5, 6.0, 2.0, step=0.5)
 
+        current_sig = make_signature(
+            "d2a", params,
+            bitstr=bitstr,
+            scheme=scheme,
+            kwargs=tuple(sorted((k, float(v)) for k, v in kwargs.items())),
+        )
+
         run = st.button("Run simulation", type="primary", disabled=invalid_params)
 
     if "d2a_last" not in st.session_state:
         st.session_state["d2a_last"] = None
 
+    if "d2a_sig" not in st.session_state:
+        st.session_state["d2a_sig"] = None
+
     if run:
         st.session_state["d2a_last"] = simulate_d2a(bits, scheme, params, **kwargs)
+        st.session_state["d2a_sig"] = current_sig
+
     res = st.session_state.get("d2a_last", None)
+
+    sig = st.session_state.get("d2a_sig", None)
+    if res is not None and sig != current_sig:
+        res = None
+        st.session_state["d2a_last"] = None
     
     if res is None:
         empty_state("Pick a modulation, then click **Run simulation** to generate the waveforms.")
