@@ -231,14 +231,14 @@ if mode == "Digital → Digital":
             # Input bits as step
             t_bits = np.arange(len(bits)*Ns) / params.fs
             x_bits = bits_to_step(bits, Ns)
-            st.plotly_chart(plot_signal(t_bits, x_bits, "Input bits (0/1)", grid=show_grid, step=True, x_dtick=params.Tb, y_dtick=1), use_container_width=True)
+            st.plotly_chart(plot_signal(t_bits, x_bits, "Input bits (0/1)", grid=show_grid, step=True, x_dtick=params.Tb, y_dtick=1), width='stretch')
 
-            st.plotly_chart(plot_signal(t_to_plot, tx_to_plot, f"Encoded waveform ({scheme})", grid=show_grid, x_dtick=params.Tb, y_dtick=1), use_container_width=True)
+            st.plotly_chart(plot_signal(t_to_plot, tx_to_plot, f"Encoded waveform ({scheme})", grid=show_grid, x_dtick=params.Tb, y_dtick=1), width='stretch')
 
             dec = res.bits["decoded"]
             t_dec = np.arange(len(dec)*Ns) / params.fs
             x_dec = bits_to_step(dec, Ns)
-            st.plotly_chart(plot_signal(t_dec, x_dec, "Decoded bits (0/1)", grid=show_grid, step=True, x_dtick=params.Tb, y_dtick=1), use_container_width=True)
+            st.plotly_chart(plot_signal(t_dec, x_dec, "Decoded bits (0/1)", grid=show_grid, step=True, x_dtick=params.Tb, y_dtick=1), width='stretch')
 
             if compare_mode:
                 st.info("Compare mode: showing a few key schemes for the same input.")
@@ -246,10 +246,10 @@ if mode == "Digital → Digital":
                 for idx, s2 in enumerate(["NRZ-L", "NRZI", "Manchester", "Bipolar-AMI"]):
                     r2 = simulate_d2d(bits, s2, params)
                     with cols[idx % 2]:
-                        st.plotly_chart(plot_signal(r2.t, r2.signals["tx"] * line_amp, f"{s2}", grid=show_grid, x_dtick=params.Tb, y_dtick=1), use_container_width=True)
+                        st.plotly_chart(plot_signal(r2.t, r2.signals["tx"] * line_amp, f"{s2}", grid=show_grid, x_dtick=params.Tb, y_dtick=1), width='stretch')
 
         with tab2:
-            st.plotly_chart(plot_freq(res.signals["tx"], params.fs, "Spectrum of encoded waveform"), use_container_width=True)
+            st.plotly_chart(plot_freq(res.signals["tx"], params.fs, "Spectrum of encoded waveform"), width='stretch')
 
         with tab3:
             def _scale_meta_for_display(meta_obj: dict, amp: float) -> dict:
@@ -353,16 +353,16 @@ elif mode == "Digital → Analog":
         with tab1:
             t_bits = np.arange(len(bits)*Ns) / params.fs
             x_bits = bits_to_step(bits, Ns)
-            st.plotly_chart(plot_signal(t_bits, x_bits, "Input bits (0/1)", grid=show_grid, step=True, x_dtick=params.Tb, y_dtick=1), use_container_width=True)
-            st.plotly_chart(plot_signal(res.t, res.signals["tx"], f"Modulated signal ({scheme})", grid=show_grid, x_dtick=params.Tb, y_dtick=1), use_container_width=True)
+            st.plotly_chart(plot_signal(t_bits, x_bits, "Input bits (0/1)", grid=show_grid, step=True, x_dtick=params.Tb, y_dtick=1), width='stretch')
+            st.plotly_chart(plot_signal(res.t, res.signals["tx"], f"Modulated signal ({scheme})", grid=show_grid, x_dtick=params.Tb, y_dtick=1), width='stretch')
 
             dec = res.bits["decoded"]
             t_dec = np.arange(len(dec)*Ns) / params.fs
             x_dec = bits_to_step(dec, Ns)
-            st.plotly_chart(plot_signal(t_dec, x_dec, "Recovered bits (0/1)", grid=show_grid, step=True, x_dtick=params.Tb, y_dtick=1), use_container_width=True)
+            st.plotly_chart(plot_signal(t_dec, x_dec, "Recovered bits (0/1)", grid=show_grid, step=True, x_dtick=params.Tb, y_dtick=1), width='stretch')
 
         with tab2:
-            st.plotly_chart(plot_freq(res.signals["tx"], params.fs, "Spectrum of modulated signal"), use_container_width=True)
+            st.plotly_chart(plot_freq(res.signals["tx"], params.fs, "Spectrum of modulated signal"), width='stretch')
 
         with tab3:
             st.json(res.meta.get("demodulate", {}))
@@ -417,7 +417,7 @@ elif mode == "Analog → Digital":
         tab1, tab2, tab3, tab4 = st.tabs(["Waveforms", "Frequency", "Steps", "Details"])
 
         with tab1:
-            st.plotly_chart(plot_signal(res.t, res.signals["m(t)"], "Message m(t)", grid=show_grid), use_container_width=True)
+            st.plotly_chart(plot_signal(res.t, res.signals["m(t)"], "Message m(t)", grid=show_grid), width='stretch')
 
             # sampled points
             t_s = res.meta["sampled"]["t_s"]
@@ -426,31 +426,31 @@ elif mode == "Analog → Digital":
             fig.add_trace(go.Scatter(x=res.t, y=res.signals["m(t)"], mode="lines", name="m(t)"))
             fig.add_trace(go.Scatter(x=t_s, y=m_s, mode="markers", name="Samples"))
             fig.update_layout(title="Message with sampled points", xaxis_title="Time (s)", yaxis_title="Amplitude")
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
 
             if technique == "PCM":
                 q = res.meta["quantized"]["q"]
                 fig2 = go.Figure()
                 fig2.add_trace(go.Scatter(x=t_s, y=q, mode="lines", line_shape="hv", name="Quantized (stair)"))
                 fig2.update_layout(title="PCM Quantized Staircase", xaxis_title="Time (s)", yaxis_title="Amplitude")
-                st.plotly_chart(fig2, use_container_width=True)
+                st.plotly_chart(fig2, width='stretch')
             else:
                 stair = res.meta["stair"]["stair"]
                 fig2 = go.Figure()
                 fig2.add_trace(go.Scatter(x=t_s, y=stair, mode="lines", line_shape="hv", name="DM Staircase"))
                 fig2.update_layout(title="Delta Modulation Staircase", xaxis_title="Time (s)", yaxis_title="Amplitude")
-                st.plotly_chart(fig2, use_container_width=True)
+                st.plotly_chart(fig2, width='stretch')
 
             t_bits = res.meta["t_bits"]
             st.plotly_chart(
                 plot_signal(t_bits, res.signals["linecode"], f"Line-coded bitstream ({linecode_scheme})",
                             grid=show_grid, x_dtick=params.Tb, y_dtick=1),
-                use_container_width=True
+                width='stretch'
             )
 
 
         with tab2:
-            st.plotly_chart(plot_freq(res.signals["m(t)"], res.meta["fs_display"], "Spectrum of message"), use_container_width=True)
+            st.plotly_chart(plot_freq(res.signals["m(t)"], res.meta["fs_display"], "Spectrum of message"), width='stretch')
 
         with tab3:
             st.json(res.meta)
@@ -500,12 +500,12 @@ elif mode == "Analog → Analog":
         tab1, tab2, tab3, tab4 = st.tabs(["Waveforms", "Frequency", "Steps", "Details"])
 
         with tab1:
-            st.plotly_chart(plot_signal(res.t, res.signals["m(t)"], "Message m(t)", grid=show_grid), use_container_width=True)
-            st.plotly_chart(plot_signal(res.t, res.signals["tx"], f"Modulated signal ({scheme})", grid=show_grid, x_dtick=params.Tb, y_dtick=1), use_container_width=True)
-            st.plotly_chart(plot_signal(res.t, res.signals["recovered"], "Recovered message", grid=show_grid), use_container_width=True)
+            st.plotly_chart(plot_signal(res.t, res.signals["m(t)"], "Message m(t)", grid=show_grid), width='stretch')
+            st.plotly_chart(plot_signal(res.t, res.signals["tx"], f"Modulated signal ({scheme})", grid=show_grid, x_dtick=params.Tb, y_dtick=1), width='stretch')
+            st.plotly_chart(plot_signal(res.t, res.signals["recovered"], "Recovered message", grid=show_grid), width='stretch')
 
         with tab2:
-            st.plotly_chart(plot_freq(res.signals["tx"], aparams.fs, "Spectrum of modulated signal"), use_container_width=True)
+            st.plotly_chart(plot_freq(res.signals["tx"], aparams.fs, "Spectrum of modulated signal"), width='stretch')
 
         with tab3:
             st.json(res.meta)
