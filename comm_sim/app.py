@@ -48,27 +48,50 @@ with st.sidebar:
 
     st.divider()
 
-    # Common params
+    # -------------------------
+    # Common params (mode-aware)
+    # -------------------------
     st.subheader("Common parameters")
+
+    # Always meaningful (Digital sampling / time base)
     Ns = st.slider("Samples per bit (Ns)", 20, 400, 100, step=10)
     Tb = st.number_input("Bit duration Tb (s)", min_value=0.001, value=1.0, step=0.1)
 
-    # For analog carriers / analog modes
-    Ac = st.number_input("Carrier amplitude Ac", min_value=0.1, value=1.0, step=0.1)
-    cycles_per_bit = st.slider("Carrier cycles per bit (for passband)", 2, 30, 10)
-    fc = float(cycles_per_bit) / float(Tb)
-
-    # Non-editable derived value (updates automatically when Tb or cycles_per_bit changes)
+    # Derived sampling rate
+    fs = Ns / Tb
     st.text_input(
-        "Carrier frequency\nfc = cycles_per_bit / Tb  (Hz)",
-        value=f"{fc:.6g}",
+        "Sampling frequency\nfs = Ns / Tb  (Hz)",
+        value=f"{fs:.6g}",
         disabled=True,
     )
 
-    # Default fs based on digital sampling; analog modes override if needed
-    fs = Ns / Tb
+    # Carrier controls only for Digital → Analog
+    # (Keep hidden defaults for other modes so SimParams stays valid everywhere)
+    Ac_default = 1.0
+    cycles_default = 10
+
+    if mode == "Digital → Analog":
+        st.divider()
+        st.caption("Carrier parameters (used only for passband modulation)")
+
+        Ac = st.number_input("Carrier amplitude Ac", min_value=0.1, value=1.0, step=0.1)
+        cycles_per_bit = st.slider("Carrier cycles per bit", 2, 30, 10)
+    else:
+        Ac = Ac_default
+        cycles_per_bit = cycles_default
+
+    fc = float(cycles_per_bit) / float(Tb)
+
+    # Show fc only when it matters (Digital → Analog)
+    if mode == "Digital → Analog":
+        st.text_input(
+            "Carrier frequency\nfc = cycles_per_bit / Tb  (Hz)",
+            value=f"{fc:.6g}",
+            disabled=True,
+        )
 
     params = SimParams(fs=fs, Tb=Tb, samples_per_bit=Ns, Ac=Ac, fc=fc)
+
 
     st.divider()
 
@@ -124,14 +147,7 @@ if mode in ("Digital → Digital", "Digital → Analog"):
         if "bitstr" not in st.session_state:
             st.session_state["bitstr"] = default_bits
 
-        def _invalidate_cached_results():
-            for k in ["d2d_last", "d2a_last", "a2d_last", "a2a_last",
-                      "d2d_sig", "d2a_sig", "a2d_sig", "a2a_sig"]:
-                if k in st.session_state:
-                    st.session_state[k] = None
-
-        st.text_input("Bitstring", key="bitstr", on_change=_invalidate_cached_results)
-
+        st.text_input("Bitstring", key="bitstr")
 
         st.slider("Random bits N", 8, 256, 32, step=8, key="rand_n")
         st.text_input("Seed (optional)", value="", key="rand_seed")
@@ -141,7 +157,6 @@ if mode in ("Digital → Digital", "Digital → Analog"):
             s = int(seed_txt) if seed_txt else None
             n = int(st.session_state.get("rand_n", 32))
             st.session_state["bitstr"] = bits_to_string(gen_random_bits(n, seed=s))
-            _invalidate_cached_results()
 
         st.button("Generate random bits", on_click=_gen_bits_cb)
 
@@ -157,10 +172,11 @@ if mode in ("Digital → Digital", "Digital → Analog"):
 if mode == "Digital → Digital":
     with st.sidebar:
         st.subheader("Technique")
-        line_amp = st.slider("Line amplitude (±A)", 1.0, 10.0, 1.0, step=0.5)
+        line_amp = st.slider("Line amplitude (±A)", 1.0, 10.0, 1.0, step=0.5, key="d2d_line_amp")
         scheme = st.selectbox(
             "Line coding / Scrambling",
-            ["NRZ-L", "NRZI", "Manchester", "Differential Manchester", "Bipolar-AMI", "Pseudoternary", "B8ZS", "HDB3"]
+            ["NRZ-L", "NRZI", "Manchester", "Differential Manchester", "Bipolar-AMI", "Pseudoternary", "B8ZS", "HDB3"],
+            key="d2d_scheme",
         )
 
         nrzi_start_level = -1
@@ -173,82 +189,84 @@ if mode == "Digital → Digital":
         manchester_prev_bit = 1       # assumed bit value immediately before the sequence starts (0 or 1)
 
         if scheme == "NRZ-L":
-            opt = st.selectbox("Assumed level BEFORE first bit", ["High (+A)", "Low (-A)"], index=0)
+            opt = st.selectbox("Assumed level BEFORE first bit", ["High (+A)", "Low (-A)"], index=0, key="d2d_nrzl_prev")
             nrzl_prev_level = +1 if opt.startswith("High") else -1
 
         if scheme == "NRZI":
-            opt = st.selectbox("Assumed level BEFORE first bit", ["Low (-A)", "High (+A)"], index=0)
+            opt = st.selectbox("Assumed level BEFORE first bit", ["Low (-A)", "High (+A)"], index=0, key="d2d_nrzi_prev")
             nrzi_start_level = -1 if opt.startswith("Low") else +1
 
         if scheme == "Manchester":
-            opt = st.selectbox("Assumed preceding bit (affects transition at t=0)", ["1", "0"], index=0)
+            opt = st.selectbox("Assumed preceding bit (affects transition at t=0)", ["1", "0"], index=0, key="d2d_manch_prevbit")
             manchester_prev_bit = 1 if opt == "1" else 0
 
         if scheme == "Differential Manchester":
-            opt = st.selectbox("Assumed level BEFORE first bit", ["High (+A)", "Low (-A)"], index=0)
+            opt = st.selectbox("Assumed level BEFORE first bit", ["High (+A)", "Low (-A)"], index=0, key="d2d_diffman_prev")
             diff_start_level = +1.0 if opt.startswith("High") else -1.0
 
         if scheme == "Pseudoternary":
-            opt = st.selectbox("Most recent preceding '0' polarity", ["Negative (-A)", "Positive (+A)"], index=0)
+            opt = st.selectbox("Most recent preceding '0' polarity", ["Negative (-A)", "Positive (+A)"], index=0, key="d2d_pseudo_last0")
             last_zero_pulse_init = -1 if opt.startswith("Negative") else +1
 
         hdb3_nonzero_since_violation_init = 0  # 0=even, 1=odd
 
         if scheme in ("Bipolar-AMI", "B8ZS"):
-            opt = st.selectbox("Most recent preceding '1' polarity", ["Negative (-A)", "Positive (+A)"], index=0)
+            opt = st.selectbox("Most recent preceding '1' polarity", ["Negative (-A)", "Positive (+A)"], index=0, key="d2d_ami_last1")
             last_pulse_init = -1 if opt.startswith("Negative") else +1
 
         if scheme == "HDB3":
-            opt1 = st.selectbox("Polarity of preceding pulse", ["Negative (-A)", "Positive (+A)"], index=0)
+            opt1 = st.selectbox("Polarity of preceding pulse", ["Negative (-A)", "Positive (+A)"], index=0, key="d2d_hdb3_lastpulse")
             last_pulse_init = -1 if opt1.startswith("Negative") else +1
 
-            opt2 = st.selectbox("Bipolar pulses since last substitution", ["Even", "Odd"], index=0)
+            opt2 = st.selectbox("Bipolar pulses since last substitution", ["Even", "Odd"], index=0, key="d2d_hdb3_parity")
             hdb3_nonzero_since_violation_init = 0 if opt2 == "Even" else 1
-
-        compare_mode = st.checkbox("Compare mode (show multiple)", value=False)
 
         current_sig = make_signature(
             "d2d", params,
             bitstr=bitstr,
             scheme=scheme,
-            line_amp=float(line_amp),
             nrzi_start_level=int(nrzi_start_level),
             diff_start_level=float(diff_start_level),
             last_pulse_init=int(last_pulse_init),
             last_zero_pulse_init=int(last_zero_pulse_init),
-            nrzl_prev_level=int(nrzl_prev_level),
-            manchester_prev_bit=int(manchester_prev_bit),
             hdb3_nonzero_since_violation_init=int(hdb3_nonzero_since_violation_init),
         )
 
-        run = st.button("Run simulation", type="primary")
+        compare_mode = st.checkbox("Compare mode (show multiple)", value=False, key="d2d_compare")
+        run = st.button("Run simulation", type="primary", key="d2d_run")
 
-    if "d2d_last" not in st.session_state:
-        st.session_state["d2d_last"] = None
+        # Auto-run if live and signature changed (or never ran before)
+        if "d2d_last" not in st.session_state:
+            st.session_state["d2d_last"] = None
+        if "d2d_sig" not in st.session_state:
+            st.session_state["d2d_sig"] = None
 
-    if run:
-        st.session_state["d2d_last"] = simulate_d2d(
-            bits, scheme, params,
-            nrzi_start_level=nrzi_start_level,
-            diff_start_level=diff_start_level,
-            last_pulse_init=last_pulse_init,
-            last_zero_pulse_init=last_zero_pulse_init,
-            hdb3_nonzero_since_violation_init=hdb3_nonzero_since_violation_init,
-        )
-        st.session_state["d2d_sig"] = current_sig
+        live = True # always live for d2d
+
+        prev_sig = st.session_state.get("d2d_sig", None)
+
+        # Manual run always possible.
+        # Live auto-run only AFTER the user has run once (prev_sig is not None).
+        should_run = bool(run) or (live and (prev_sig is not None) and (prev_sig != current_sig))
+
+        if should_run:
+            st.session_state["d2d_last"] = simulate_d2d(
+                bits, scheme, params,
+                nrzi_start_level=nrzi_start_level,
+                diff_start_level=diff_start_level,
+                last_pulse_init=last_pulse_init,
+                last_zero_pulse_init=last_zero_pulse_init,
+                hdb3_nonzero_since_violation_init=hdb3_nonzero_since_violation_init,
+            )
+            st.session_state["d2d_sig"] = current_sig
     
     res = st.session_state.get("d2d_last", None)
-
-    sig = st.session_state.get("d2d_sig", None)
-    if res is not None and sig != current_sig:
-        res = None
-        st.session_state["d2d_last"] = None
 
     if res is None:
         empty_state("Choose a scheme, optionally generate bits, then click **Run simulation**.")
     else:
         st.subheader("Results")
-        summary_block({**res.meta, "fs": params.fs, "fc": params.fc, "Tb": params.Tb, "samples_per_bit": params.samples_per_bit})
+        summary_block({**res.meta, "fs": params.fs, "Tb": params.Tb, "samples_per_bit": params.samples_per_bit})
 
         tab1, tab2, tab3, tab4 = st.tabs(["Waveforms", "Frequency", "Steps", "Details"])
 
