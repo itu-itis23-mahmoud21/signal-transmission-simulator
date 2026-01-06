@@ -396,70 +396,89 @@ elif mode == "Digital → Analog":
 
         if scheme == "BFSK":
             nyq = float(params.fs) / 2.0
-
-            # Max deviation so both tones stay within (0, Nyquist)
+        
+            # Max symmetric deviation so both tones stay within (0, Nyquist)
             dev_max = min(fc - 0.1, nyq - fc - 0.1)
-
+        
             if dev_max <= 0:
                 st.error("BFSK invalid: fc is too close to 0 or Nyquist for any symmetric tones.")
                 invalid_params = True
-                dev_max = 0.1
-
-            # Session defaults
+                dev_max = 0.1  # avoid crashing the UI
+        
+            f0_min = float(fc - dev_max)
+            f0_max = float(fc)
+            f1_min = float(fc)
+            f1_max = float(fc + dev_max)
+        
+            # Initialize state once
             if "bfsk_dev" not in st.session_state:
                 st.session_state["bfsk_dev"] = float(min(2.0 / Tb, 0.8 * dev_max)) if dev_max > 0 else 0.5
-
-            # Keep derived tones in state too (so widgets can bind to them)
+        
             if "bfsk_f0" not in st.session_state or "bfsk_f1" not in st.session_state:
                 d = float(st.session_state["bfsk_dev"])
+                d = float(np.clip(d, 0.0, dev_max))
                 st.session_state["bfsk_f0"] = float(fc - d)
                 st.session_state["bfsk_f1"] = float(fc + d)
-
-            def _sync_from_f0():
+        
+            # Clamp existing values to new ranges whenever fc/fs/Tb changes
+            st.session_state["bfsk_f0"] = float(np.clip(float(st.session_state["bfsk_f0"]), f0_min, f0_max))
+            st.session_state["bfsk_f1"] = float(np.clip(float(st.session_state["bfsk_f1"]), f1_min, f1_max))
+        
+            # Force symmetry around fc using the larger deviation of the two
+            d0 = float(fc - st.session_state["bfsk_f0"])
+            d1 = float(st.session_state["bfsk_f1"] - fc)
+            d = float(np.clip(max(d0, d1), 0.0, dev_max))
+            st.session_state["bfsk_dev"] = d
+            st.session_state["bfsk_f0"] = float(fc - d)
+            st.session_state["bfsk_f1"] = float(fc + d)
+        
+            def _sync_from_f0_slider():
                 f0 = float(st.session_state["bfsk_f0"])
-                d = abs(float(fc) - f0)
-                d = min(max(d, 0.0), float(dev_max))
+                d = float(np.clip(fc - f0, 0.0, dev_max))
                 st.session_state["bfsk_dev"] = d
                 st.session_state["bfsk_f0"] = float(fc - d)
                 st.session_state["bfsk_f1"] = float(fc + d)
-
-            def _sync_from_f1():
+        
+            def _sync_from_f1_slider():
                 f1 = float(st.session_state["bfsk_f1"])
-                d = abs(f1 - float(fc))
-                d = min(max(d, 0.0), float(dev_max))
+                d = float(np.clip(f1 - fc, 0.0, dev_max))
                 st.session_state["bfsk_dev"] = d
                 st.session_state["bfsk_f0"] = float(fc - d)
                 st.session_state["bfsk_f1"] = float(fc + d)
-
-            st.caption("Book convention: f0 = fc − Δf and f1 = fc + Δf (symmetric around fc).")
-
-            st.number_input(
+        
+            st.caption("Book convention: f0 = fc − Δf and f1 = fc + Δf (linked symmetrically).")
+        
+            st.slider(
                 "f0 (Hz) for binary 0",
-                min_value=0.1,
-                max_value=float(nyq - 0.1),
+                min_value=f0_min,
+                max_value=f0_max,
+                step=0.1,
                 key="bfsk_f0",
-                on_change=_sync_from_f0,
+                on_change=_sync_from_f0_slider,
             )
-            st.number_input(
+        
+            st.slider(
                 "f1 (Hz) for binary 1",
-                min_value=0.1,
-                max_value=float(nyq - 0.1),
+                min_value=f1_min,
+                max_value=f1_max,
+                step=0.1,
                 key="bfsk_f1",
-                on_change=_sync_from_f1,
+                on_change=_sync_from_f1_slider,
             )
-
+        
             st.text_input(
-                "Derived deviation Δf = |f1 − fc| = |fc − f0| (Hz)",
+                "Derived deviation Δf (Hz)",
                 value=f"{float(st.session_state['bfsk_dev']):.6g}",
                 disabled=True,
             )
-
+        
             kwargs["f0"] = float(st.session_state["bfsk_f0"])
             kwargs["f1"] = float(st.session_state["bfsk_f1"])
-
+        
             if np.isclose(kwargs["f0"], kwargs["f1"]):
                 st.error("Invalid BFSK: f0 and f1 cannot be equal.")
                 invalid_params = True
+        
 
         if scheme == "MFSK":
             nyq = float(params.fs) / 2.0
