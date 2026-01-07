@@ -48,7 +48,7 @@ def plot_signal(t, x, title, grid=False, step=False, x_dtick=1, y_dtick=1):
 
 logo_path = Path(__file__).parent / "assets" / "itu-logo.png"
 
-col_logo, col_text = st.columns([1, 12], vertical_alignment="center")
+col_logo, col_text, col_ref = st.columns([1, 7, 4], vertical_alignment="center")
 with col_logo:
     data = base64.b64encode(logo_path.read_bytes()).decode("utf-8")
     st.markdown(
@@ -94,6 +94,24 @@ with col_text:
         unsafe_allow_html=True,
     )
 
+with col_ref:
+    st.markdown(
+        """
+        <div style="text-align:right; line-height:1.25; margin-top:0.15rem;">
+            <div style="font-size:0.92rem; opacity:0.82;">
+              All algorithms in this simulator follow
+            </div>
+            <a href="http://williamstallings.com/DataComm/" target="_blank" style="text-decoration:none; color:inherit;">
+                <div style="font-size:0.86rem; opacity:0.72;">
+                  <b>Data and Computer Communications (10th ed.)</b>
+                  by William Stallings
+                </div>
+            </a>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
 st.markdown(
     """
     <style>
@@ -108,13 +126,46 @@ st.markdown(
         background-color: rgba(128, 128, 128, 0.18);
         opacity: 1.0;
       }
+      .gh-icon {
+        display: inline-flex;
+        vertical-align: middle;
+        margin-right: 6px;
+        opacity: 0.85;
+      }
+      .gh-icon svg {
+        width: 16px;
+        height: 16px;
+        fill: currentColor;
+      }
     </style>
 
     <div style="font-size:0.95rem; opacity:0.78; margin-bottom:0.5rem; margin-top:0.5rem;">
       Created by:
-      <a class="creator-link" href="https://github.com/itu-itis23-mahmoud21" target="_blank">Mohamed Ahmed Abdelsattar Mahmoud</a>
-      &amp;
-      <a class="creator-link" href="https://github.com/racha-badreddine" target="_blank">Racha Baddredine</a>
+      <a class="creator-link" href="https://github.com/itu-itis23-mahmoud21" target="_blank"> <span class="gh-icon" aria-hidden="true">
+        <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+          <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
+          0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52
+          -.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78
+          -.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21
+          2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44
+          1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54
+          1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>
+        </svg>
+      </span>Mohamed Ahmed Abdelsattar Mahmoud</a>
+      <span style="font-size:1.1rem;">
+        &amp;
+      </span>
+      <a class="creator-link" href="https://github.com/racha-badreddine" target="_blank"> <span class="gh-icon" aria-hidden="true">
+        <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+          <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
+          0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52
+          -.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78
+          -.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21
+          2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44
+          1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54
+          1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>
+        </svg>
+      </span>Racha Baddredine</a>
     </div>
     """,
     unsafe_allow_html=True,
@@ -770,7 +821,7 @@ if mode == "Digital → Digital":
 elif mode == "Digital → Analog":
     with st.sidebar:
         st.subheader("Technique")
-        label = st.selectbox("Modulation", ["ASK", "BFSK", "MFSK", "BPSK", "QPSK", "16-QAM"])
+        label = st.selectbox("Modulation Technique", ["ASK", "BFSK", "MFSK", "BPSK", "QPSK", "16-QAM"])
         scheme = "16QAM" if label == "16-QAM" else label
 
         st.subheader("Technique parameters")
@@ -844,8 +895,13 @@ elif mode == "Digital → Analog":
                 st.session_state["bfsk_f0"] = float(fc - d)
                 st.session_state["bfsk_f1"] = float(fc + d)
         
-            st.caption("Book convention: f0 = fc − Δf and f1 = fc + Δf (linked symmetrically).")
-        
+            st.markdown(
+                "<div style='font-size:0.85rem; opacity:0.75; margin-bottom:1rem;'>"
+                "Book convention:<br/>f0 = fc − Δf and f1 = fc + Δf , |Δf| ≠ 0"
+                "</div>",
+                unsafe_allow_html=True,
+            )
+
             st.slider(
                 "f0 (Hz) for binary 0",
                 min_value=f0_min,
