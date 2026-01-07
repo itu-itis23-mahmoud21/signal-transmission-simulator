@@ -215,11 +215,24 @@ if mode == "Digital → Digital":
     with st.sidebar:
         st.subheader("Technique")
         line_amp = st.slider("Line amplitude (±A)", 1.0, 10.0, 1.0, step=0.5, key="d2d_line_amp")
-        scheme = st.selectbox(
-            "Line coding / Scrambling",
-            ["NRZ-L", "NRZI", "Manchester", "Differential Manchester", "Bipolar-AMI", "Pseudoternary", "B8ZS", "HDB3"],
-            key="d2d_scheme",
+        st.session_state.pop("d2d_scheme", None)
+
+        base_scheme = st.selectbox(
+            "Encoding Algorithm",
+            ["NRZ-L", "NRZI", "Manchester", "Differential Manchester", "Bipolar-AMI", "Pseudoternary"],
+            key="d2d_base_scheme",
         )
+
+        # Scrambling selector only for AMI
+        if base_scheme == "Bipolar-AMI":
+            scramble = st.selectbox(
+                "Scrambling Technique",
+                ["None", "B8ZS", "HDB3"],
+                key="d2d_scramble",
+            )
+            scheme = "Bipolar-AMI" if scramble == "None" else scramble
+        else:
+            scheme = base_scheme
 
         nrzi_start_level = -1
         diff_start_level = +1.0
