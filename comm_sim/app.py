@@ -922,10 +922,25 @@ elif mode == "Digital → Analog":
             dem = res.meta.get("demodulate", {})
 
             if isinstance(dem, dict):
+                # 1) Make a copy so we can format without touching the original
+                dem2 = dict(dem)
+
+                # 2) ASK-specific formatting (safe even if the key isn't present)
+                if "A0" in dem2 and isinstance(dem2["A0"], (int, float, np.floating)):
+                    dem2["A0"] = f"{float(dem2['A0']):.2f}"
+                if "A1" in dem2 and isinstance(dem2["A1"], (int, float, np.floating)):
+                    dem2["A1"] = f"{float(dem2['A1']):.2f}"
+                if "thr" in dem2 and isinstance(dem2["thr"], (int, float, np.floating)):
+                    dem2["thr"] = f"{float(dem2['thr']):.3f}"  # good balance for threshold
+
+                # Pull A_hat out so it doesn't appear as one huge list in the main table
+                a_hat = dem2.pop("A_hat", None)
+                warnings_list = dem2.pop("warnings", None)
+
+                # 3) Keep your existing “simple vs event list” logic
                 simple = {}
                 event_lists = {}
-
-                for k, v in dem.items():
+                for k, v in dem2.items():
                     if isinstance(v, list) and len(v) > 0 and isinstance(v[0], dict):
                         event_lists[k] = v
                     else:
@@ -933,12 +948,24 @@ elif mode == "Digital → Analog":
 
                 dict_to_pretty_table(simple, width=700)
 
+                # 4) Show A_hat as a separate table (cleaner + controlled decimals)
+                if isinstance(a_hat, list):
+                    with st.expander("A_hat (estimated amplitude per bit)", expanded=True):
+                        rows = [{"bit_index": i, "A_hat": f"{float(a):.3f}"} for i, a in enumerate(a_hat)]
+                        render_events_table(rows, width=1000)
+
+                if isinstance(warnings_list, list) and len(warnings_list) > 0:
+                    with st.expander("Warnings", expanded=True):
+                        wrows = [{"warning": w} for w in warnings_list]
+                        render_events_table(wrows, width=1000)
+
+                # 5) Existing event tables (if any)
                 for name, ev in event_lists.items():
                     with st.expander(name, expanded=True):
                         render_events_table(ev, width=1000)
             else:
                 st.write(dem)
-
+            
         with tab4:
             st.write("Input bits:")
             st.code(bits_to_string(res.bits["input"]))
