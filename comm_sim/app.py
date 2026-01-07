@@ -169,7 +169,87 @@ def summary_block(meta: dict):
         width=600, 
     )
 
+def dict_to_pretty_table(data: dict, *, width: int = 600):
+    """
+    Render a dict as a 2-column zebra-striped table (like Summary).
+    Falls back to showing non-scalars as compact strings.
+    """
+    if not isinstance(data, dict) or not data:
+        st.info("No data.")
+        return
 
+    rows = []
+    for k, v in data.items():
+        # Keep simple scalars as-is
+        if isinstance(v, (str, int, float, bool, type(None), np.floating)):
+            rows.append({"Field": str(k), "Value": v})
+        else:
+            # For lists/dicts/arrays: show compact text (readable, not huge JSON)
+            rows.append({"Field": str(k), "Value": str(v)})
+
+    df = pd.DataFrame(rows)
+
+    def _zebra(row):
+        if row.name % 2 == 1:
+            return ["background-color: rgba(128,128,128,0.10)"] * len(row)
+        return [""] * len(row)
+
+    styler = df.style.apply(_zebra, axis=1)
+
+    st.dataframe(
+        styler,
+        hide_index=True,
+        use_container_width=False,
+        width=width,
+    )
+
+def render_events_table(events: list, *, width: int = 850):
+    """Render a list[dict] as a zebra-striped table."""
+    if not isinstance(events, list) or len(events) == 0:
+        st.info("No events.")
+        return
+
+    # Make values readable (lists -> short strings)
+    rows = []
+    for e in events:
+        if not isinstance(e, dict):
+            rows.append({"event": str(e)})
+            continue
+        def _fmt_num(x):
+            if isinstance(x, (np.integer, int)):
+                return int(x)
+            if isinstance(x, (np.floating, float)):
+                xf = float(x)
+                # If it's basically an integer, show as int
+                if np.isfinite(xf) and abs(xf - round(xf)) < 1e-9:
+                    return int(round(xf))
+                # Otherwise show a short decimal (no trailing zeros)
+                s = f"{xf:.4f}".rstrip("0").rstrip(".")
+                return s
+            return x
+
+        r = {}
+        for k, v in e.items():
+            if isinstance(v, list):
+                # Format numeric lists nicely (patterns/chunks/windows)
+                r[k] = "[" + ", ".join(str(_fmt_num(x)) for x in v) + "]"
+            else:
+                r[k] = _fmt_num(v)
+        rows.append(r)
+
+    df = pd.DataFrame(rows)
+
+    def _zebra(row):
+        if row.name % 2 == 1:
+            return ["background-color: rgba(128,128,128,0.10)"] * len(row)
+        return [""] * len(row)
+
+    st.dataframe(
+        df.style.apply(_zebra, axis=1),
+        hide_index=True,
+        use_container_width=False,
+        width=width,
+    )
 
 def empty_state(message: str = "Click **Run simulation** from the sidebar to see results."):
     # Centered, friendly placeholder
@@ -562,7 +642,7 @@ if mode == "Digital → Digital":
                         # make common numeric fields floats so Streamlit JSON colors them consistently
                         for k in ("pos", "count_since_last_sub"):
                             if k in s2 and isinstance(s2[k], (int, float)):
-                                s2[k] = float(s2[k])
+                                s2[k] = int(s2[k])
                         new_subs.append(s2)
                     m["substitutions"] = new_subs
 
@@ -583,19 +663,34 @@ if mode == "Digital → Digital":
                         # make common numeric fields floats for consistent coloring
                         for k in ("pos", "v", "b"):
                             if k in h2 and isinstance(h2[k], (int, float)):
-                                h2[k] = float(h2[k])
+                                h2[k] = int(h2[k])
+
                         new_hits.append(h2)
                     m["descramble_hits"] = new_hits
 
                 m["display_amplitude"] = amp
                 return m
 
+            enc = _scale_meta_for_display(res.meta.get("encode", {}), line_amp)
+            dec = _scale_meta_for_display(res.meta.get("decode", {}), line_amp)
+
+            # Pull out the nested lists so they don't ruin the pretty table
+            enc_subs = enc.pop("substitutions", None)
+            dec_hits = dec.pop("descramble_hits", None)
+
             st.write("Encoder meta:")
-            st.json(_scale_meta_for_display(res.meta.get("encode", {}), line_amp))
+            dict_to_pretty_table(enc, width=600)
+
+            if isinstance(enc_subs, list):
+                with st.expander("Encoder substitutions", expanded=True):
+                    render_events_table(enc_subs, width=850)
 
             st.write("Decoder meta:")
-            st.json(_scale_meta_for_display(res.meta.get("decode", {}), line_amp))
+            dict_to_pretty_table(dec, width=600)
 
+            if isinstance(dec_hits, list):
+                with st.expander("Decoder descramble hits", expanded=True):
+                    render_events_table(dec_hits, width=850)
 
         with tab4:
             st.write("Input bits:")
