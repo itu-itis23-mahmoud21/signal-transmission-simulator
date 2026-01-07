@@ -20,6 +20,13 @@ st.markdown(
     [data-testid="InputInstructions"] {
         display: none !important;
     }
+
+    section[data-testid="stMain"] > div[data-testid="stMainBlockContainer"]{
+        padding-top: 3rem !important;
+        padding-left: 3rem !important;
+        padding-right: 3rem !important;
+        padding-bottom: 3rem !important;
+    }
     </style>
     """,
     unsafe_allow_html=True,
