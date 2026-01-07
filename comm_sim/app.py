@@ -4,7 +4,7 @@ import streamlit as st
 import numpy as np
 import plotly.graph_objects as go
 
-from utils import SimParams, bits_from_string, bits_to_string, gen_random_bits, bits_to_step, fft_mag
+from utils import SimParams, bits_from_string, bits_to_string, gen_random_bits, bits_to_step
 from d2d import simulate_d2d
 from d2a import simulate_d2a
 from a2d import simulate_a2d
@@ -35,15 +35,6 @@ def plot_signal(t, x, title, grid=False, step=False, x_dtick=1, y_dtick=1):
         fig.update_yaxes(showgrid=True, tickmode="linear", dtick=y_dtick)
 
     return fig
-
-
-def plot_freq(x, fs, title):
-    f, mag = fft_mag(np.asarray(x, dtype=float), fs)
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=f, y=mag, mode="lines", name="|X(f)|"))
-    fig.update_layout(title=title, xaxis_title="Frequency (Hz)", yaxis_title="Magnitude")
-    return fig
-
 
 st.title("Principles of Computer Communications — Transmission Simulator")
 
@@ -349,7 +340,7 @@ if mode == "Digital → Digital":
         st.subheader("Results")
         summary_block({**res.meta, "fs": params.fs, "Tb": params.Tb, "samples_per_bit": params.samples_per_bit})
 
-        tab1, tab2, tab3, tab4 = st.tabs(["Waveforms", "Frequency", "Steps", "Details"])
+        tab1, tab3, tab4 = st.tabs(["Waveforms", "Steps", "Details"])
 
         with tab1:
             tx_scaled = res.signals["tx"] * line_amp
@@ -484,9 +475,6 @@ if mode == "Digital → Digital":
                             plot_signal(t2, tx2, title, grid=show_grid, x_dtick=params.Tb, y_dtick=1),
                             width="stretch",
                         )
-
-        with tab2:
-            st.plotly_chart(plot_freq(res.signals["tx"], params.fs, "Spectrum of encoded waveform"), width='stretch')
 
         with tab3:
             def _scale_meta_for_display(meta_obj: dict, amp: float) -> dict:
@@ -725,7 +713,7 @@ elif mode == "Digital → Analog":
         st.subheader("Results")
         summary_block({**res.meta, "fs": params.fs, "fc": params.fc, "Tb": params.Tb, "samples_per_bit": params.samples_per_bit})
 
-        tab1, tab2, tab3, tab4 = st.tabs(["Waveforms", "Frequency", "Steps", "Details"])
+        tab1, tab3, tab4 = st.tabs(["Waveforms", "Steps", "Details"])
 
         with tab1:
             t_bits = np.arange(len(bits)*Ns) / params.fs
@@ -737,9 +725,6 @@ elif mode == "Digital → Analog":
             t_dec = np.arange(len(dec)*Ns) / params.fs
             x_dec = bits_to_step(dec, Ns)
             st.plotly_chart(plot_signal(t_dec, x_dec, "Recovered bits (0/1)", grid=show_grid, step=True, x_dtick=params.Tb, y_dtick=1), width='stretch')
-
-        with tab2:
-            st.plotly_chart(plot_freq(res.signals["tx"], params.fs, "Spectrum of modulated signal"), width='stretch')
 
         with tab3:
             st.json(res.meta.get("demodulate", {}))
@@ -791,7 +776,7 @@ elif mode == "Analog → Digital":
         )
 
         st.subheader("Results")
-        tab1, tab2, tab3, tab4 = st.tabs(["Waveforms", "Frequency", "Steps", "Details"])
+        tab1, tab3, tab4 = st.tabs(["Waveforms", "Steps", "Details"])
 
         with tab1:
             st.plotly_chart(plot_signal(res.t, res.signals["m(t)"], "Message m(t)", grid=show_grid), width='stretch')
@@ -824,10 +809,6 @@ elif mode == "Analog → Digital":
                             grid=show_grid, x_dtick=params.Tb, y_dtick=1),
                 width='stretch'
             )
-
-
-        with tab2:
-            st.plotly_chart(plot_freq(res.signals["m(t)"], res.meta["fs_display"], "Spectrum of message"), width='stretch')
 
         with tab3:
             st.json(res.meta)
@@ -874,15 +855,12 @@ elif mode == "Analog → Analog":
         aparams = SimParams(fs=float(fs_a), Tb=params.Tb, samples_per_bit=params.samples_per_bit, Ac=float(Ac_a), fc=float(fc_a))
         res = simulate_a2a(kind, scheme, aparams, Am=Am, fm=fm, duration=duration, ka=ka, kf=kf, kp=kp)
 
-        tab1, tab2, tab3, tab4 = st.tabs(["Waveforms", "Frequency", "Steps", "Details"])
+        tab1, tab3, tab4 = st.tabs(["Waveforms", "Steps", "Details"])
 
         with tab1:
             st.plotly_chart(plot_signal(res.t, res.signals["m(t)"], "Message m(t)", grid=show_grid), width='stretch')
             st.plotly_chart(plot_signal(res.t, res.signals["tx"], f"Modulated signal ({scheme})", grid=show_grid, x_dtick=params.Tb, y_dtick=1), width='stretch')
             st.plotly_chart(plot_signal(res.t, res.signals["recovered"], "Recovered message", grid=show_grid), width='stretch')
-
-        with tab2:
-            st.plotly_chart(plot_freq(res.signals["tx"], aparams.fs, "Spectrum of modulated signal"), width='stretch')
 
         with tab3:
             st.json(res.meta)
