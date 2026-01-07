@@ -421,6 +421,43 @@ if mode == "Digital → Digital":
                         x2 = np.concatenate([[init_level], x2])
 
                     return t2, x2
+                
+                def _assumption_note_for_compare(s: str) -> str | None:
+                    # Show notes only for plots that are NOT the currently selected scheme
+                    if s == scheme:
+                        return None
+
+                    amp = f"{line_amp:g}"  # show numeric amplitude cleanly
+
+                    if s == "NRZ-L":
+                        lvl = "High" if nrzl_prev_level > 0 else "Low"
+                        sign = "+" if nrzl_prev_level > 0 else "-"
+                        return f"Assumed level BEFORE first bit: {lvl} ({sign}{amp})"
+
+                    if s == "NRZI":
+                        lvl = "High" if nrzi_start_level > 0 else "Low"
+                        sign = "+" if nrzi_start_level > 0 else "-"
+                        return f"Assumed level BEFORE first bit: {lvl} ({sign}{amp})"
+
+                    if s == "Manchester":
+                        return f"Assumed preceding bit: {manchester_prev_bit}"
+
+                    if s == "Differential Manchester":
+                        lvl = "High" if diff_start_level > 0 else "Low"
+                        sign = "+" if diff_start_level > 0 else "-"
+                        return f"Assumed level BEFORE first bit: {lvl} ({sign}{amp})"
+
+                    if s == "Bipolar-AMI":
+                        pol = "Positive" if last_pulse_init > 0 else "Negative"
+                        sign = "+" if last_pulse_init > 0 else "-"
+                        return f"Assumed most recent preceding '1' polarity: {pol} ({sign}{amp})"
+
+                    if s == "Pseudoternary":
+                        pol = "Positive" if last_zero_pulse_init > 0 else "Negative"
+                        sign = "+" if last_zero_pulse_init > 0 else "-"
+                        return f"Assumed most recent preceding '0' polarity: {pol} ({sign}{amp})"
+
+                    return None
 
                 for idx, s2 in enumerate(["NRZ-L", "NRZI", "Manchester", "Differential Manchester", "Bipolar-AMI", "Pseudoternary"]):
                     # IMPORTANT: pass the SAME init params so AMI/Pseudoternary/NRZI/DiffMan match the main plot
@@ -437,8 +474,14 @@ if mode == "Digital → Digital":
                     t2, tx2 = _prep_plot(s2, r2.t, tx2)
 
                     with cols[idx % 2]:
+                        note = _assumption_note_for_compare(s2)
+                        if note:
+                            title = f"{s2}  <span style='font-size:0.80em; opacity:0.8'>'{note}'</span>"
+                        else:
+                            title = f"{s2}"
+
                         st.plotly_chart(
-                            plot_signal(t2, tx2, f"{s2}", grid=show_grid, x_dtick=params.Tb, y_dtick=1),
+                            plot_signal(t2, tx2, title, grid=show_grid, x_dtick=params.Tb, y_dtick=1),
                             width="stretch",
                         )
 
