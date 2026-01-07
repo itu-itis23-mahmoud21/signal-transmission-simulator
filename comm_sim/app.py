@@ -154,11 +154,24 @@ if mode in ("Digital → Digital", "Digital → Analog"):
         st.subheader("Digital input")
         default_bits = "10110010"
 
-        # Initialize the widget state once
+        # Applied value (used by simulation)
         if "bitstr" not in st.session_state:
             st.session_state["bitstr"] = default_bits
 
-        st.text_input("Bitstring", key="bitstr")
+        # Draft value (what user edits)
+        if "bitstr_draft" not in st.session_state:
+            st.session_state["bitstr_draft"] = st.session_state["bitstr"]
+
+        st.text_input("Bitstring", key="bitstr_draft")
+
+        # Validate bitstring and show the message under the input (sidebar)
+        _tmp = st.session_state.get("bitstr_draft", "").strip()
+        if _tmp == "":
+            st.error("Bitstring must contain only 0 and 1.")
+        else:
+            bad = [ch for ch in _tmp if ch not in "01"]
+            if bad:
+                st.error("Bitstring must contain only 0 and 1.")
 
         st.slider("Random bits N", 8, 256, 32, step=8, key="rand_n")
         st.text_input("Seed (optional)", value="", key="rand_seed")
@@ -172,13 +185,18 @@ if mode in ("Digital → Digital", "Digital → Analog"):
         st.button("Generate random bits", on_click=_gen_bits_cb)
 
     # Always read the current bitstring from session_state
-    bitstr = st.session_state["bitstr"]
+    bitstr = st.session_state["bitstr"].strip()
+
+    bitstr_draft = st.session_state.get("bitstr_draft", "").strip()
+    draft_invalid = (bitstr_draft == "") or any(ch not in "01" for ch in bitstr_draft)
+
+    bits = None
+    bitstr_invalid = False
 
     try:
         bits = bits_from_string(bitstr)
-    except Exception as e:
-        st.error(str(e))
-        st.stop()
+    except Exception:
+        bitstr_invalid = True
 
 if mode == "Digital → Digital":
     with st.sidebar:
@@ -244,7 +262,7 @@ if mode == "Digital → Digital":
         )
 
         compare_mode = st.checkbox("Compare mode (show multiple)", value=False, key="d2d_compare")
-        run = st.button("Run simulation", type="primary", key="d2d_run")
+        run = st.button("Run simulation", type="primary", key="d2d_run", disabled=draft_invalid)
 
         # Auto-run if live and signature changed (or never ran before)
         if "d2d_last" not in st.session_state:
@@ -260,9 +278,28 @@ if mode == "Digital → Digital":
         # Live auto-run only AFTER the user has run once (prev_sig is not None).
         should_run = bool(run) or (live and (prev_sig is not None) and (prev_sig != current_sig))
 
-        if should_run:
+        if run and (not draft_invalid):
+            # Apply the draft bitstring ONLY when user clicks Run
+            st.session_state["bitstr"] = st.session_state["bitstr_draft"].strip()
+
+            # Parse applied bits for this run
+            bitstr_run = st.session_state["bitstr"]
+            bits_run = bits_from_string(bitstr_run)
+
+            # Recompute signature with the applied bitstring
+            current_sig = make_signature(
+                "d2d", params,
+                bitstr=bitstr_run,
+                scheme=scheme,
+                nrzi_start_level=int(nrzi_start_level),
+                diff_start_level=float(diff_start_level),
+                last_pulse_init=int(last_pulse_init),
+                last_zero_pulse_init=int(last_zero_pulse_init),
+                hdb3_nonzero_since_violation_init=int(hdb3_nonzero_since_violation_init),
+            )
+
             st.session_state["d2d_last"] = simulate_d2d(
-                bits, scheme, params,
+                bits_run, scheme, params,
                 nrzi_start_level=nrzi_start_level,
                 diff_start_level=diff_start_level,
                 last_pulse_init=last_pulse_init,
@@ -270,7 +307,7 @@ if mode == "Digital → Digital":
                 hdb3_nonzero_since_violation_init=hdb3_nonzero_since_violation_init,
             )
             st.session_state["d2d_sig"] = current_sig
-    
+
     res = st.session_state.get("d2d_last", None)
 
     if res is None:
@@ -308,8 +345,9 @@ if mode == "Digital → Digital":
                 tx_to_plot = np.concatenate([[init_level], tx_to_plot])
 
             # Input bits as step
-            t_bits = np.arange(len(bits)*Ns) / params.fs
-            x_bits = bits_to_step(bits, Ns)
+            inp = res.bits["input"]
+            t_bits = np.arange(len(inp)*Ns) / params.fs
+            x_bits = bits_to_step(inp, Ns)
             st.plotly_chart(plot_signal(t_bits, x_bits, "Input bits (0/1)", grid=show_grid, step=True, x_dtick=params.Tb, y_dtick=1), width='stretch')
 
             st.plotly_chart(plot_signal(t_to_plot, tx_to_plot, f"Encoded waveform ({scheme})", grid=show_grid, x_dtick=params.Tb, y_dtick=1), width='stretch')
@@ -323,7 +361,7 @@ if mode == "Digital → Digital":
                 st.info("Compare mode: showing a few key schemes for the same input.")
                 cols = st.columns(2)
                 for idx, s2 in enumerate(["NRZ-L", "NRZI", "Manchester", "Bipolar-AMI"]):
-                    r2 = simulate_d2d(bits, s2, params)
+                    r2 = simulate_d2d(res.bits["input"], s2, params)
                     with cols[idx % 2]:
                         st.plotly_chart(plot_signal(r2.t, r2.signals["tx"] * line_amp, f"{s2}", grid=show_grid, x_dtick=params.Tb, y_dtick=1), width='stretch')
 
