@@ -12,6 +12,17 @@ from a2a import simulate_a2a
 
 st.set_page_config(layout="wide")
 
+st.markdown(
+    """
+    <style>
+    [data-testid="InputInstructions"] {
+        display: none !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 def plot_signal(t, x, title, grid=False, step=False, x_dtick=1, y_dtick=1):
     fig = go.Figure()
     if step:
