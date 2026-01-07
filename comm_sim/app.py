@@ -105,7 +105,7 @@ with st.sidebar:
 
     if mode == "Digital → Analog":
         st.divider()
-        st.caption("Carrier parameters (used only for passband modulation)")
+        st.subheader("Carrier parameters")
 
         Ac = st.number_input("Carrier amplitude Ac", min_value=0.1, value=1.0, step=0.1)
         cycles_per_bit = st.slider("Carrier cycles per bit", 2, 30, 10)
@@ -308,12 +308,12 @@ if mode in ("Digital → Digital", "Digital → Analog"):
         if "bitstr_draft" not in st.session_state:
             st.session_state["bitstr_draft"] = st.session_state["bitstr"]
 
-        st.text_input("Bitstring", key="bitstr_draft")
+        st.text_input("Bitstring (required)", key="bitstr_draft")
 
         # Validate bitstring and show the message under the input (sidebar)
         _tmp = st.session_state.get("bitstr_draft", "").strip()
         if _tmp == "":
-            st.error("Bitstring must contain only 0 and 1.")
+            st.error("Bitstring is required.")
         else:
             bad = [ch for ch in _tmp if ch not in "01"]
             if bad:
@@ -942,7 +942,7 @@ elif mode == "Digital → Analog":
         with tab4:
             st.write("Input bits:")
             st.code(bits_to_string(res.bits["input"]))
-            
+
             st.write("Decoded bits:")
             st.code(bits_to_string(res.bits["decoded"]))
 
