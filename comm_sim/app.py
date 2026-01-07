@@ -58,7 +58,7 @@ st.markdown(
       <a class="creator-link" href="https://github.com/itu-itis23-mahmoud21" target="_blank">
         Mohamed Ahmed Abdelsattar Mahmoud
       </a>
-      &nbsp;•&nbsp;
+      &
       <a class="creator-link" href="https://github.com/racha-badreddine" target="_blank">
         Racha Baddredine
       </a>
@@ -717,7 +717,8 @@ if mode == "Digital → Digital":
 elif mode == "Digital → Analog":
     with st.sidebar:
         st.subheader("Technique")
-        scheme = st.selectbox("Modulation", ["ASK", "BFSK", "MFSK", "BPSK", "QPSK", "16QAM"])
+        label = st.selectbox("Modulation", ["ASK", "BFSK", "MFSK", "BPSK", "QPSK", "16-QAM"])
+        scheme = "16QAM" if label == "16-QAM" else label
 
         st.subheader("Technique parameters")
         kwargs = {}
@@ -852,29 +853,51 @@ elif mode == "Digital → Analog":
 
         current_sig = make_signature(
             "d2a", params,
-            bitstr=bitstr,
+            bitstr=st.session_state["bitstr"].strip(),
             scheme=scheme,
             kwargs=tuple(sorted((k, float(v)) for k, v in kwargs.items())),
         )
 
-        run = st.button("Run simulation", type="primary", disabled=invalid_params)
+        run = st.button(
+            "Run simulation",
+            type="primary",
+            disabled=(invalid_params or draft_invalid or seed_invalid),
+        )
 
+    # --- D2A run state (aligned with D2D) ---
     if "d2a_last" not in st.session_state:
         st.session_state["d2a_last"] = None
-
     if "d2a_sig" not in st.session_state:
         st.session_state["d2a_sig"] = None
-
-    if run:
-        st.session_state["d2a_last"] = simulate_d2a(bits, scheme, params, **kwargs)
+    
+    live = True  # same idea as D2D: auto-update after first run when params change
+    prev_sig = st.session_state.get("d2a_sig", None)
+    
+    # Don't auto-rerun while user is typing a new (not applied) bitstring draft
+    draft_dirty = st.session_state.get("bitstr_draft", "").strip() != st.session_state.get("bitstr", "").strip()
+    
+    should_run = bool(run) or (live and (prev_sig is not None) and (prev_sig != current_sig) and (not draft_dirty))
+    
+    if should_run and (not seed_invalid) and (not invalid_params):
+        # Apply draft -> applied ONLY when user clicks Run
+        if run and (not draft_invalid):
+            st.session_state["bitstr"] = st.session_state["bitstr_draft"].strip()
+    
+        bitstr_run = st.session_state["bitstr"].strip()
+        bits_run = bits_from_string(bitstr_run)
+    
+        # Recompute sig based on what we actually ran
+        current_sig = make_signature(
+            "d2a", params,
+            bitstr=bitstr_run,
+            scheme=scheme,
+            kwargs=tuple(sorted((k, float(v)) for k, v in kwargs.items())),
+        )
+    
+        st.session_state["d2a_last"] = simulate_d2a(bits_run, scheme, params, **kwargs)
         st.session_state["d2a_sig"] = current_sig
-
+    
     res = st.session_state.get("d2a_last", None)
-
-    sig = st.session_state.get("d2a_sig", None)
-    if res is not None and sig != current_sig:
-        res = None
-        st.session_state["d2a_last"] = None
     
     if res is None:
         empty_state("Pick a modulation, then click **Run simulation** to generate the waveforms.")
@@ -884,8 +907,9 @@ elif mode == "Digital → Analog":
         tab1, tab3, tab4 = st.tabs(["Waveforms", "Steps", "Details"])
 
         with tab1:
-            t_bits = np.arange(len(bits)*Ns) / params.fs
-            x_bits = bits_to_step(bits, Ns)
+            inp = res.bits["input"]
+            t_bits = np.arange(len(inp)*Ns) / params.fs
+            x_bits = bits_to_step(inp, Ns)
             st.plotly_chart(plot_signal(t_bits, x_bits, "Input bits (0/1)", grid=show_grid, step=True, x_dtick=params.Tb, y_dtick=1), width='stretch')
             st.plotly_chart(plot_signal(res.t, res.signals["tx"], f"Modulated signal ({scheme})", grid=show_grid, x_dtick=params.Tb, y_dtick=1), width='stretch')
 
@@ -895,11 +919,33 @@ elif mode == "Digital → Analog":
             st.plotly_chart(plot_signal(t_dec, x_dec, "Recovered bits (0/1)", grid=show_grid, step=True, x_dtick=params.Tb, y_dtick=1), width='stretch')
 
         with tab3:
-            st.json(res.meta.get("demodulate", {}))
+            dem = res.meta.get("demodulate", {})
+
+            if isinstance(dem, dict):
+                simple = {}
+                event_lists = {}
+
+                for k, v in dem.items():
+                    if isinstance(v, list) and len(v) > 0 and isinstance(v[0], dict):
+                        event_lists[k] = v
+                    else:
+                        simple[k] = v
+
+                dict_to_pretty_table(simple, width=700)
+
+                for name, ev in event_lists.items():
+                    with st.expander(name, expanded=True):
+                        render_events_table(ev, width=1000)
+            else:
+                st.write(dem)
 
         with tab4:
-            st.code("Input:   " + bits_to_string(bits))
-            st.code("Decoded:  " + bits_to_string(res.bits["decoded"]))
+            st.write("Input bits:")
+            st.code(bits_to_string(res.bits["input"]))
+            
+            st.write("Decoded bits:")
+            st.code(bits_to_string(res.bits["decoded"]))
+
             st.write("Match:")
             if res.meta["match"]:
                 st.success("MATCH")
