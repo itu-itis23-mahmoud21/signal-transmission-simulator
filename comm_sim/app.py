@@ -3,6 +3,7 @@ from __future__ import annotations
 import streamlit as st
 import numpy as np
 import plotly.graph_objects as go
+import pandas as pd
 
 from utils import SimParams, bits_from_string, bits_to_string, gen_random_bits, bits_to_step
 from d2d import simulate_d2d
@@ -36,7 +37,37 @@ def plot_signal(t, x, title, grid=False, step=False, x_dtick=1, y_dtick=1):
 
     return fig
 
-st.title("Principles of Computer Communications — Transmission Simulator")
+st.markdown(
+    """
+    <style>
+      .creator-link {
+        text-decoration: none;
+        color: inherit;
+        padding: 2px 6px;
+        border-radius: 8px;
+        transition: background-color 120ms ease, opacity 120ms ease;
+      }
+      .creator-link:hover {
+        background-color: rgba(128, 128, 128, 0.18);
+        opacity: 1.0;
+      }
+    </style>
+
+    <div style="font-size:0.95rem; opacity:0.78; margin-bottom:0.25rem;">
+      Created by:
+      <a class="creator-link" href="https://github.com/itu-itis23-mahmoud21" target="_blank">
+        Mohamed Ahmed Abdelsattar Mahmoud
+      </a>
+      &nbsp;•&nbsp;
+      <a class="creator-link" href="https://github.com/racha-badreddine" target="_blank">
+        Racha Baddredine
+      </a>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.title("Principles of Computer Communications — Encoding and Modulation Techniques Simulator")
 
 with st.sidebar:
     st.header("Controls")
@@ -97,15 +128,48 @@ with st.sidebar:
 
     st.divider()
 
-
 def summary_block(meta: dict):
-    items = []
-    for k in ["scheme", "match", "input_len", "pad_info", "fs", "fc", "Tb", "samples_per_bit"]:
-        if k in meta:
-            items.append((k, meta[k]))
-    if items:
-        st.subheader("Summary")
-        st.json({k: v for k, v in items})
+    keys = ["scheme", "match", "input_len", "pad_info", "fs", "fc", "Tb", "samples_per_bit"]
+
+    rows = []
+    for k in keys:
+        if k not in meta:
+            continue
+        v = meta[k]
+
+        # Fixed formatting
+        if k == "Tb" and isinstance(v, (int, float, np.floating)):
+            v = f"{float(v):.2f}"
+        elif k == "fs" and isinstance(v, (int, float, np.floating)):
+            v = f"{float(v):.4f}"
+        elif k == "fc" and isinstance(v, (int, float, np.floating)):
+            v = f"{float(v):.4f}"
+
+        rows.append({"Field": k, "Value": v})
+
+    if not rows:
+        return
+
+    st.subheader("Summary")
+
+    df = pd.DataFrame(rows)
+
+    def _zebra(row):
+        # shade every 2nd row lightly
+        if row.name % 2 == 1:
+            return ["background-color: rgba(128,128,128,0.10)"] * len(row)
+        return [""] * len(row)
+
+    styler = df.style.apply(_zebra, axis=1)
+
+    st.dataframe(
+        styler,
+        hide_index=True,
+        use_container_width=False,
+        width=600, 
+    )
+
+
 
 def empty_state(message: str = "Click **Run simulation** from the sidebar to see results."):
     # Centered, friendly placeholder
@@ -337,7 +401,6 @@ if mode == "Digital → Digital":
     if res is None:
         empty_state("Choose a scheme, optionally generate bits, then click **Run simulation**.")
     else:
-        st.subheader("Results")
         summary_block({**res.meta, "fs": params.fs, "Tb": params.Tb, "samples_per_bit": params.samples_per_bit})
 
         tab1, tab3, tab4 = st.tabs(["Waveforms", "Steps", "Details"])
@@ -710,7 +773,6 @@ elif mode == "Digital → Analog":
     if res is None:
         empty_state("Pick a modulation, then click **Run simulation** to generate the waveforms.")
     else:
-        st.subheader("Results")
         summary_block({**res.meta, "fs": params.fs, "fc": params.fc, "Tb": params.Tb, "samples_per_bit": params.samples_per_bit})
 
         tab1, tab3, tab4 = st.tabs(["Waveforms", "Steps", "Details"])
@@ -775,7 +837,6 @@ elif mode == "Analog → Digital":
             linecode_scheme=linecode_scheme
         )
 
-        st.subheader("Results")
         tab1, tab3, tab4 = st.tabs(["Waveforms", "Steps", "Details"])
 
         with tab1:
