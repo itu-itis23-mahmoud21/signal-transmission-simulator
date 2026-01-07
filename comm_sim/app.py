@@ -4,6 +4,7 @@ import streamlit as st
 import numpy as np
 import plotly.graph_objects as go
 import pandas as pd
+from pathlib import Path
 
 from utils import SimParams, bits_from_string, bits_to_string, gen_random_bits, bits_to_step
 from d2d import simulate_d2d
@@ -37,6 +38,24 @@ def plot_signal(t, x, title, grid=False, step=False, x_dtick=1, y_dtick=1):
 
     return fig
 
+logo_path = Path(__file__).parent / "assets" / "itu-logo.png"
+
+col_logo, col_text = st.columns([1, 10], vertical_alignment="center")
+with col_logo:
+    st.image(str(logo_path), width=72)
+
+with col_text:
+    st.markdown(
+        """
+        <div style="font-size:0.98rem; opacity:0.85; line-height:1.35; margin-top:0.1rem;">
+          This simulator was developed as a course assignment for
+          <b>Principles of Computer Communications (BLG 337E)</b><br/>
+          <span style="opacity:0.75;">Computer Engineering Faculty — Istanbul Technical University</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
 st.markdown(
     """
     <style>
@@ -55,19 +74,15 @@ st.markdown(
 
     <div style="font-size:0.95rem; opacity:0.78; margin-bottom:0.25rem;">
       Created by:
-      <a class="creator-link" href="https://github.com/itu-itis23-mahmoud21" target="_blank">
-        Mohamed Ahmed Abdelsattar Mahmoud
-      </a>
-      &
-      <a class="creator-link" href="https://github.com/racha-badreddine" target="_blank">
-        Racha Baddredine
-      </a>
+      <a class="creator-link" href="https://github.com/itu-itis23-mahmoud21" target="_blank">Mohamed Ahmed Abdelsattar Mahmoud</a>
+      &amp;
+      <a class="creator-link" href="https://github.com/racha-badreddine" target="_blank">Racha Baddredine</a>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
-st.title("Principles of Computer Communications — Encoding and Modulation Techniques Simulator")
+st.title("Encoding and Modulation Techniques Simulator")
 
 with st.sidebar:
     st.header("Controls")
