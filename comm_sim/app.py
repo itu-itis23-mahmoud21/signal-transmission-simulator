@@ -176,11 +176,24 @@ if mode in ("Digital → Digital", "Digital → Analog"):
         st.slider("Random bits N", 8, 256, 32, step=8, key="rand_n")
         st.text_input("Seed (optional)", value="", key="rand_seed")
 
+        # Validate seed (optional): must be integer if provided
+        seed_txt = st.session_state.get("rand_seed", "").strip()
+        seed_invalid = False
+        if seed_txt != "":
+            if seed_txt == "-" or not seed_txt.lstrip("-").isdigit():
+                seed_invalid = True
+                st.error("Seed must be an integer.")
+        
         def _gen_bits_cb():
             seed_txt = st.session_state.get("rand_seed", "").strip()
-            s = int(seed_txt) if seed_txt else None
+            if seed_txt != "":
+                if seed_txt == "-" or not seed_txt.lstrip("-").isdigit():
+                    return  # invalid seed -> do nothing (sidebar error already shown)
+                s = int(seed_txt)
+            else:
+                s = None
             n = int(st.session_state.get("rand_n", 32))
-            st.session_state["bitstr"] = bits_to_string(gen_random_bits(n, seed=s))
+            st.session_state["bitstr_draft"] = bits_to_string(gen_random_bits(n, seed=s))
 
         st.button("Generate random bits", on_click=_gen_bits_cb)
 
@@ -262,7 +275,12 @@ if mode == "Digital → Digital":
         )
 
         compare_mode = st.checkbox("Compare mode (show multiple)", value=False, key="d2d_compare")
-        run = st.button("Run simulation", type="primary", key="d2d_run", disabled=draft_invalid)
+        run = st.button(
+            "Run simulation",
+            type="primary",
+            key="d2d_run",
+            disabled=(draft_invalid or seed_invalid),
+        )
 
         # Auto-run if live and signature changed (or never ran before)
         if "d2d_last" not in st.session_state:
