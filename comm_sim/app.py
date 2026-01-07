@@ -305,19 +305,21 @@ if mode == "Digital → Digital":
 
         prev_sig = st.session_state.get("d2d_sig", None)
 
-        # Manual run always possible.
-        # Live auto-run only AFTER the user has run once (prev_sig is not None).
-        should_run = bool(run) or (live and (prev_sig is not None) and (prev_sig != current_sig))
+        # If the user is editing a new bitstring draft (not yet applied), don't auto-rerun.
+        draft_dirty = st.session_state.get("bitstr_draft", "").strip() != st.session_state.get("bitstr", "").strip()
 
-        if run and (not draft_invalid):
+        should_run = bool(run) or (live and (prev_sig is not None) and (prev_sig != current_sig) and (not draft_dirty))
+
+        if should_run and (not seed_invalid):
             # Apply the draft bitstring ONLY when user clicks Run
-            st.session_state["bitstr"] = st.session_state["bitstr_draft"].strip()
+            if run and (not draft_invalid):
+                st.session_state["bitstr"] = st.session_state["bitstr_draft"].strip()
 
-            # Parse applied bits for this run
-            bitstr_run = st.session_state["bitstr"]
+            # Use the applied bitstring for the actual simulation
+            bitstr_run = st.session_state["bitstr"].strip()
             bits_run = bits_from_string(bitstr_run)
 
-            # Recompute signature with the applied bitstring
+            # Recompute signature based on the applied bitstring
             current_sig = make_signature(
                 "d2d", params,
                 bitstr=bitstr_run,
@@ -389,12 +391,56 @@ if mode == "Digital → Digital":
             st.plotly_chart(plot_signal(t_dec, x_dec, "Decoded bits (0/1)", grid=show_grid, step=True, x_dtick=params.Tb, y_dtick=1), width='stretch')
 
             if compare_mode:
-                st.info("Compare mode: showing a few key schemes for the same input.")
+                st.info("Compare mode: ON → showing all schemes with the same input bits.")
                 cols = st.columns(2)
-                for idx, s2 in enumerate(["NRZ-L", "NRZI", "Manchester", "Bipolar-AMI"]):
-                    r2 = simulate_d2d(res.bits["input"], s2, params)
+
+                def _prep_plot(s: str, t: np.ndarray, tx_scaled: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+                    # Apply the SAME “assumption visualization” rules used by the main Encoded waveform
+                    t2 = t
+                    x2 = tx_scaled
+
+                    if s == "NRZ-L":
+                        init_level = nrzl_prev_level * line_amp
+                        t2 = np.concatenate([[0.0], t2])
+                        x2 = np.concatenate([[init_level], x2])
+
+                    if s == "NRZI":
+                        init_level = nrzi_start_level * line_amp
+                        t2 = np.concatenate([[0.0], t2])
+                        x2 = np.concatenate([[init_level], x2])
+
+                    if s == "Manchester":
+                        prev_end_level = (+1 if manchester_prev_bit == 1 else -1)
+                        init_level = prev_end_level * line_amp
+                        t2 = np.concatenate([[0.0], t2])
+                        x2 = np.concatenate([[init_level], x2])
+
+                    if s == "Differential Manchester":
+                        init_level = diff_start_level * line_amp
+                        t2 = np.concatenate([[0.0], t2])
+                        x2 = np.concatenate([[init_level], x2])
+
+                    return t2, x2
+
+                for idx, s2 in enumerate(["NRZ-L", "NRZI", "Manchester", "Differential Manchester", "Bipolar-AMI", "Pseudoternary"]):
+                    # IMPORTANT: pass the SAME init params so AMI/Pseudoternary/NRZI/DiffMan match the main plot
+                    r2 = simulate_d2d(
+                        res.bits["input"], s2, params,
+                        nrzi_start_level=nrzi_start_level,
+                        diff_start_level=diff_start_level,
+                        last_pulse_init=last_pulse_init,
+                        last_zero_pulse_init=last_zero_pulse_init,
+                        hdb3_nonzero_since_violation_init=hdb3_nonzero_since_violation_init,
+                    )
+
+                    tx2 = r2.signals["tx"] * line_amp
+                    t2, tx2 = _prep_plot(s2, r2.t, tx2)
+
                     with cols[idx % 2]:
-                        st.plotly_chart(plot_signal(r2.t, r2.signals["tx"] * line_amp, f"{s2}", grid=show_grid, x_dtick=params.Tb, y_dtick=1), width='stretch')
+                        st.plotly_chart(
+                            plot_signal(t2, tx2, f"{s2}", grid=show_grid, x_dtick=params.Tb, y_dtick=1),
+                            width="stretch",
+                        )
 
         with tab2:
             st.plotly_chart(plot_freq(res.signals["tx"], params.fs, "Spectrum of encoded waveform"), width='stretch')
