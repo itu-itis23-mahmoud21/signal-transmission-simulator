@@ -153,6 +153,7 @@ def summary_block(meta: dict):
     st.subheader("Summary")
 
     df = pd.DataFrame(rows)
+    df = df.fillna("").astype(str)
 
     def _zebra(row):
         # shade every 2nd row lightly
@@ -166,10 +167,10 @@ def summary_block(meta: dict):
         styler,
         hide_index=True,
         use_container_width=False,
-        width=600, 
+        width=700, 
     )
 
-def dict_to_pretty_table(data: dict, *, width: int = 600):
+def dict_to_pretty_table(data: dict, *, width: int = 700):
     """
     Render a dict as a 2-column zebra-striped table (like Summary).
     Falls back to showing non-scalars as compact strings.
@@ -216,17 +217,20 @@ def render_events_table(events: list, *, width: int = 850):
             rows.append({"event": str(e)})
             continue
         def _fmt_num(x):
+            # Always return a STRING so Streamlit aligns everything the same way
             if isinstance(x, (np.integer, int)):
-                return int(x)
+                return str(int(x))
+
             if isinstance(x, (np.floating, float)):
                 xf = float(x)
-                # If it's basically an integer, show as int
                 if np.isfinite(xf) and abs(xf - round(xf)) < 1e-9:
-                    return int(round(xf))
-                # Otherwise show a short decimal (no trailing zeros)
-                s = f"{xf:.4f}".rstrip("0").rstrip(".")
-                return s
-            return x
+                    return str(int(round(xf)))
+                return f"{xf:.4f}".rstrip("0").rstrip(".")
+
+            if x is None:
+                return ""
+
+            return str(x)
 
         r = {}
         for k, v in e.items():
@@ -244,8 +248,15 @@ def render_events_table(events: list, *, width: int = 850):
             return ["background-color: rgba(128,128,128,0.10)"] * len(row)
         return [""] * len(row)
 
+    styler = (
+        df.style
+          .apply(_zebra, axis=1)
+          .set_properties(**{"text-align": "left"})
+          .set_table_styles([{"selector": "th", "props": [("text-align", "left")]}])
+    )
+
     st.dataframe(
-        df.style.apply(_zebra, axis=1),
+        styler,
         hide_index=True,
         use_container_width=False,
         width=width,
@@ -668,7 +679,7 @@ if mode == "Digital → Digital":
                         new_hits.append(h2)
                     m["descramble_hits"] = new_hits
 
-                m["display_amplitude"] = amp
+                m["display_amplitude"] = f"{float(amp):.2f}"
                 return m
 
             enc = _scale_meta_for_display(res.meta.get("encode", {}), line_amp)
@@ -679,18 +690,18 @@ if mode == "Digital → Digital":
             dec_hits = dec.pop("descramble_hits", None)
 
             st.write("Encoder meta:")
-            dict_to_pretty_table(enc, width=600)
+            dict_to_pretty_table(enc, width=700)
 
             if isinstance(enc_subs, list):
                 with st.expander("Encoder substitutions", expanded=True):
-                    render_events_table(enc_subs, width=850)
+                    render_events_table(enc_subs, width=1000)
 
             st.write("Decoder meta:")
-            dict_to_pretty_table(dec, width=600)
+            dict_to_pretty_table(dec, width=700)
 
             if isinstance(dec_hits, list):
                 with st.expander("Decoder descramble hits", expanded=True):
-                    render_events_table(dec_hits, width=850)
+                    render_events_table(dec_hits, width=1000)
 
         with tab4:
             st.write("Input bits:")
