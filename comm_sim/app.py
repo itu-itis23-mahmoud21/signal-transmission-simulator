@@ -5,6 +5,7 @@ import numpy as np
 import plotly.graph_objects as go
 import pandas as pd
 from pathlib import Path
+import base64
 
 from utils import SimParams, bits_from_string, bits_to_string, gen_random_bits, bits_to_step
 from d2d import simulate_d2d
@@ -17,16 +18,16 @@ st.set_page_config(layout="wide")
 st.markdown(
     """
     <style>
-    [data-testid="InputInstructions"] {
-        display: none !important;
-    }
+        [data-testid="InputInstructions"] {
+            display: none !important;
+        }
 
-    section[data-testid="stMain"] > div[data-testid="stMainBlockContainer"]{
-        padding-top: 3rem !important;
-        padding-left: 3rem !important;
-        padding-right: 3rem !important;
-        padding-bottom: 3rem !important;
-    }
+        section[data-testid="stMain"] > div[data-testid="stMainBlockContainer"]{
+            padding-top: 2.2rem !important;
+            padding-left: 3rem !important;
+            padding-right: 3rem !important;
+            padding-bottom: 2.2rem !important;
+        }
     </style>
     """,
     unsafe_allow_html=True,
@@ -47,17 +48,47 @@ def plot_signal(t, x, title, grid=False, step=False, x_dtick=1, y_dtick=1):
 
 logo_path = Path(__file__).parent / "assets" / "itu-logo.png"
 
-col_logo, col_text = st.columns([1, 10], vertical_alignment="center")
+col_logo, col_text = st.columns([1, 12], vertical_alignment="center")
 with col_logo:
-    st.image(str(logo_path), width=72)
+    data = base64.b64encode(logo_path.read_bytes()).decode("utf-8")
+    st.markdown(
+        f"""
+        <a href="https://itu.edu.tr/en/homepage" target="_blank" style="display:inline-block; line-height:0;">
+          <img
+            src="data:image/png;base64,{data}"
+            alt="Istanbul Technical University"
+            style="
+              height:80px; width:auto;
+              display:block;
+              margin:0; padding:0;
+              object-fit:contain;
+            "
+          />
+        </a>
+        """,
+        unsafe_allow_html=True,
+    )
+
 
 with col_text:
     st.markdown(
         """
         <div style="font-size:0.98rem; opacity:0.85; line-height:1.35; margin-top:0.1rem;">
           This simulator was developed as a course assignment for
-          <b>Principles of Computer Communications (BLG 337E)</b><br/>
-          <span style="opacity:0.75;">Computer Engineering Faculty — Istanbul Technical University</span>
+          <a href="https://ninova.itu.edu.tr/en/public.dersler.ders.aspx?dil=en&kategori=faculty-of-computer-and-informatics&dersId=5507"
+             target="_blank"
+             style="text-decoration:none; color:inherit;">
+            <b>Principles of Computer Communications (BLG 337E)</b>
+          </a><br/>
+          <span style="opacity:0.75;">
+            <a href="https://bbf.itu.edu.tr/en" target="_blank" style="text-decoration:none; color:inherit;">
+              Computer Engineering Faculty
+            </a>
+            — 
+            <a href="https://itu.edu.tr/en/homepage" target="_blank" style="text-decoration:none; color:inherit;">
+              Istanbul Technical University
+            </a>
+          </span>
         </div>
         """,
         unsafe_allow_html=True,
@@ -79,7 +110,7 @@ st.markdown(
       }
     </style>
 
-    <div style="font-size:0.95rem; opacity:0.78; margin-bottom:0.25rem;">
+    <div style="font-size:0.95rem; opacity:0.78; margin-bottom:0.5rem; margin-top:0.5rem;">
       Created by:
       <a class="creator-link" href="https://github.com/itu-itis23-mahmoud21" target="_blank">Mohamed Ahmed Abdelsattar Mahmoud</a>
       &amp;
