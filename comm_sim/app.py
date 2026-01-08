@@ -1392,32 +1392,65 @@ elif mode == "Digital → Analog":
                         rows = [{"symbol_index": i, "chosen_idx": int(idx)} for i, idx in enumerate(mfsk_chosen)]
                         render_events_table(rows, width=900)
 
-                # 4) Show A_hat as a separate table (cleaner + controlled decimals)
-                if isinstance(a_hat, list):
-                    with st.expander("A_hat (estimated amplitude per bit)", expanded=True):
-                        rows = [{"bit_index": i, "A_hat": f"{float(a):.2f}"} for i, a in enumerate(a_hat)]
+                # --- Combined I/Q tables: hat vs dec (only when both exist) ---
+                bpsym = None
+                try:
+                    bpsym = int(dem.get("bits_per_symbol"))
+                except Exception:
+                    # Fallbacks for older schemes that may not store bits_per_symbol explicitly
+                    if dem2.get("scheme") == "16QAM":
+                        bpsym = 4
+                    elif dem2.get("scheme") == "QPSK":
+                        bpsym = 2
+                    else:
+                        bpsym = 1  # default: 1 estimate per bit
+
+                same_index = (bpsym == 1)
+
+                def _make_index_cols(sym_i: int) -> dict:
+                    if same_index:
+                        return {"bit_index / symbol_index": sym_i}
+                    # show both when they differ
+                    return {
+                        "symbol_index": sym_i,
+                        "bit_index_start": sym_i * bpsym,
+                    }
+
+                # I table
+                if isinstance(i_hat, list) and isinstance(i_dec, list):
+                    with st.expander("I: I_hat vs I_dec", expanded=True):
+                        n = min(len(i_hat), len(i_dec))
+                        rows = []
+                        for k in range(n):
+                            r = _make_index_cols(k)
+                            r["I_hat"] = f"{float(i_hat[k]):.2f}"
+                            r["I_dec"] = f"{float(i_dec[k]):.2f}"
+                            rows.append(r)
                         render_events_table(rows, width=1000)
 
-                if isinstance(i_hat, list):
-                    with st.expander("I_hat (in-phase correlator per bit)", expanded=True):
-                        rows = [{"bit_index": i, "I_hat": f"{float(v):.2f}"} for i, v in enumerate(i_hat)]
+                # Q table
+                if isinstance(q_hat, list) and isinstance(q_dec, list):
+                    with st.expander("Q: Q_hat vs Q_dec", expanded=True):
+                        n = min(len(q_hat), len(q_dec))
+                        rows = []
+                        for k in range(n):
+                            r = _make_index_cols(k)
+                            r["Q_hat"] = f"{float(q_hat[k]):.2f}"
+                            r["Q_dec"] = f"{float(q_dec[k]):.2f}"
+                            rows.append(r)
                         render_events_table(rows, width=1000)
 
-                if isinstance(q_hat, list):
-                    with st.expander("Q_hat (quadrature correlator per bit)", expanded=True):
-                        rows = [{"bit_index": i, "Q_hat": f"{float(v):.2f}"} for i, v in enumerate(q_hat)]
+                # For schemes that only have hat (no dec), keep a simple display
+                if isinstance(i_hat, list) and not isinstance(i_dec, list):
+                    with st.expander("I_hat", expanded=True):
+                        rows = [{"bit_index / symbol_index": i, "I_hat": f"{float(v):.2f}"} for i, v in enumerate(i_hat)]
                         render_events_table(rows, width=1000)
 
-                if isinstance(i_dec, list):
-                    with st.expander("I_dec (decided I levels per symbol)", expanded=False):
-                        rows = [{"symbol_index": i, "I_dec": f"{float(v):.2f}"} for i, v in enumerate(i_dec)]
+                if isinstance(q_hat, list) and not isinstance(q_dec, list):
+                    with st.expander("Q_hat", expanded=True):
+                        rows = [{"bit_index / symbol_index": i, "Q_hat": f"{float(v):.2f}"} for i, v in enumerate(q_hat)]
                         render_events_table(rows, width=1000)
-
-                if isinstance(q_dec, list):
-                    with st.expander("Q_dec (decided Q levels per symbol)", expanded=False):
-                        rows = [{"symbol_index": i, "Q_dec": f"{float(v):.2f}"} for i, v in enumerate(q_dec)]
-                        render_events_table(rows, width=1000)
-
+                
                 if isinstance(phi_hat, list):
                     with st.expander("phi_hat (estimated absolute phase per bit)", expanded=False):
                         rows = [{"bit_index": i, "phi_hat (rad)": f"{float(v):.2f}"} for i, v in enumerate(phi_hat)]
