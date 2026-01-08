@@ -1236,6 +1236,8 @@ elif mode == "Digital → Analog":
             kwargs=tuple(sorted((k, float(v)) for k, v in kwargs.items())),
         )
 
+        compare_mode = st.checkbox("Compare mode (show multiple)", value=False, key="d2a_compare")
+
         run = st.button(
             "Run simulation",
             type="primary",
@@ -1295,6 +1297,121 @@ elif mode == "Digital → Analog":
             t_dec = np.arange(len(dec)*Ns) / params.fs
             x_dec = bits_to_step(dec, Ns)
             st.plotly_chart(plot_signal(t_dec, x_dec, "Recovered bits (0/1)", grid=show_grid, step=True, x_dtick=params.Tb, y_dtick=1), width='stretch')
+
+            # --- Compare mode (D2A) ---
+            if compare_mode:
+                st.info("Compare mode: ON → showing all modulation techniques with the same input bits.")
+
+                cols = st.columns(2)
+
+                # Identify the currently selected “plot” (QAM has 2 variants)
+                cur_axis_levels = None
+                if scheme == "QAM" and "axis_levels" in kwargs:
+                    try:
+                        cur_axis_levels = int(kwargs["axis_levels"])
+                    except Exception:
+                        cur_axis_levels = None
+
+                compare_items = [
+                    {
+                        "key": "ASK",
+                        "title": "ASK",
+                        "scheme": "ASK",
+                        "defaults": {"A0": 0.00, "A1": 1.00},
+                        "note": "A0 = 0.00, A1 = 1.00",
+                    },
+                    {
+                        "key": "BFSK",
+                        "title": "BFSK",
+                        "scheme": "BFSK",
+                        "defaults": {"f0": 8.00, "f1": 12.00},
+                        "note": "f0 = 8.00 Hz, f1 = 12.00 Hz",
+                    },
+                    {
+                        "key": "MFSK",
+                        "title": "MFSK",
+                        "scheme": "MFSK",
+                        "defaults": {"L": 2, "fd": 1.00},
+                        "note": "L = 2 (M = 4), fd = 1.00 Hz",
+                    },
+                    {
+                        "key": "BPSK_STD",
+                        "title": "BPSK",
+                        "scheme": "BPSK",
+                        "defaults": {"phase1": 0.0, "phase0": float(np.pi)},
+                        "note": "Standard 'φ1 = 0.00 rad, φ0 = π rad'",
+                    },
+                    {
+                        "key": "DPSK",
+                        "title": "DPSK",
+                        "scheme": "DPSK",
+                        "defaults": {"phase_init": 0.0, "delta_phase": float(np.pi)},
+                        "note": "φ_ref = 0.00 rad, Δφ = π rad",
+                    },
+                    {
+                        "key": "QPSK",
+                        "title": "QPSK",
+                        "scheme": "QPSK",
+                        "defaults": {"phi_ref": 0.0},
+                        "note": "φ_ref = 0.00 rad",
+                    },
+                    {
+                        "key": "QAM2",
+                        "title": "QAM (2-level ASK)",
+                        "scheme": "QAM",
+                        "axis_levels": 2,
+                        "defaults": {"axis_levels": 2, "phi_ref": 0.0},
+                        "note": "2-level ASK (axis_levels = 2), φ_ref = 0.00 rad",
+                    },
+                    {
+                        "key": "QAM16",
+                        "title": "16-QAM (4-level ASK)",
+                        "scheme": "QAM",
+                        "axis_levels": 4,
+                        "defaults": {"axis_levels": 4, "phi_ref": 0.0},
+                        "note": "4-level ASK (axis_levels = 4), φ_ref = 0.00 rad",
+                    },
+                ]
+
+                def _is_selected(item: dict) -> bool:
+                    if item["scheme"] != scheme:
+                        return False
+                    if item["scheme"] != "QAM":
+                        return True
+                    # QAM: selection depends on axis_levels
+                    return cur_axis_levels is not None and cur_axis_levels == int(item.get("axis_levels", -1))
+
+                # Use the SAME input bits for all
+                bits_cmp = res.bits["input"]
+
+                for idx, item in enumerate(compare_items):
+                    selected = _is_selected(item)
+                    kwargs_use = dict(kwargs) if selected else dict(item["defaults"])
+
+                    # Simulate this scheme
+                    res2 = simulate_d2a(bits_cmp, item["scheme"], params, **kwargs_use)
+
+                    # Title + note (only for non-selected)
+                    if selected:
+                        title = item["title"]
+                    else:
+                        title = (
+                            f"{item['title']}  "
+                            f"<span style='font-size:0.80em; opacity:0.8'>({item['note']})</span>"
+                        )
+
+                    with cols[idx % 2]:
+                        st.plotly_chart(
+                            plot_signal(
+                                res2.t,
+                                res2.signals["tx"],
+                                title,
+                                grid=show_grid,
+                                x_dtick=params.Tb,
+                                y_dtick=1,
+                            ),
+                            width="stretch",
+                        )
 
         with tab3:
             dem = res.meta.get("demodulate", {})
