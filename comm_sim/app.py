@@ -392,6 +392,40 @@ def empty_state(message: str = "Click **Run simulation** from the sidebar to see
         unsafe_allow_html=True,
     )
 
+def phase_as_pi_frac(x: float, *, max_den: int = 16) -> str:
+    """
+    Approximate x (radians) as k*pi/n with small denominator.
+    Returns strings like 'π/4', '-3π/4', 'π', '0', etc.
+    """
+    if not np.isfinite(x):
+        return ""
+
+    # represent as multiple of pi
+    r = float(x) / float(np.pi)
+
+    best_num, best_den, best_err = 0, 1, float("inf")
+    for den in range(1, max_den + 1):
+        num = int(round(r * den))
+        err = abs(r - (num / den))
+        if err < best_err:
+            best_num, best_den, best_err = num, den, err
+
+    # build pretty string
+    num = best_num
+    den = best_den
+
+    if num == 0:
+        return "0"
+    sign = "-" if num < 0 else ""
+    num = abs(num)
+
+    if den == 1:
+        return f"{sign}π" if num == 1 else f"{sign}{num}π"
+    else:
+        if num == 1:
+            return f"{sign}π/{den}"
+        return f"{sign}{num}π/{den}"
+
 def make_signature(mode: str, params: SimParams, **kwargs):
     # Use only JSON-serializable primitives
     base = {
@@ -1085,7 +1119,7 @@ elif mode == "Digital → Analog":
                     "Bits": e["Bits"],
                     "I level": f"{I:.0f}",
                     "Q level": f"{Q:.0f}",
-                    "Phase": f"{phase:.2f} rad",
+                    "Phase": f"{phase:.2f} ≈ {phase_as_pi_frac(phase)} rad",
                 })
 
             st.markdown(
@@ -1103,7 +1137,7 @@ elif mode == "Digital → Analog":
                     "Bits": st.column_config.TextColumn("Bits", width="small"),
                     "I level": st.column_config.TextColumn("I level", width="small"),
                     "Q level": st.column_config.TextColumn("Q level", width="small"),
-                    "Phase": st.column_config.TextColumn("Phase", width="small"),
+                    "Phase": st.column_config.TextColumn("Phase", width="medium"),
                 },
             )
 
@@ -1269,7 +1303,7 @@ elif mode == "Digital → Analog":
                     with st.expander("Q_hat (quadrature correlator per bit)", expanded=True):
                         rows = [{"bit_index": i, "Q_hat": f"{float(v):.2f}"} for i, v in enumerate(q_hat)]
                         render_events_table(rows, width=1000)
-                
+
                 if isinstance(phi_hat, list):
                     with st.expander("phi_hat (estimated absolute phase per bit)", expanded=False):
                         rows = [{"bit_index": i, "phi_hat (rad)": f"{float(v):.2f}"} for i, v in enumerate(phi_hat)]
