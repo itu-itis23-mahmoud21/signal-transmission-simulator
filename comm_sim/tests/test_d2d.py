@@ -1,4 +1,3 @@
-import os
 import random
 from typing import Dict, List
 
@@ -532,18 +531,65 @@ def test_seeded_fuzz_b8zs_hdb3_extra(seed):
 
 
 # ==================================================
-# 10) Long-run stress
+# 10) Long-run stress tests
 # ==================================================
 
-@pytest.mark.parametrize("scheme", ["B8ZS", "HDB3"])
-def test_long_run_optional(scheme):
+@pytest.mark.parametrize("scheme", [
+    "NRZ-L", "NRZI", "Manchester", "Differential Manchester",
+    "Bipolar-AMI", "Pseudoternary", "B8ZS", "HDB3"
+])
+@pytest.mark.parametrize("pattern", [
+    "all_zeros",
+    "all_ones",
+    "alt_01",
+    "alt_10",
+    "bursty_zeros",
+    "long_runs_mixed",
+    "random_seeded",
+])
+def test_long_run_all_schemes(scheme, pattern):
     params = make_params(20)
-    # worst-case for scramblers: long zeros with occasional ones
-    bits = [0] * 20_000 + [1] + [0] * 20_000 + [1] + [0] * 20_000
 
-    if scheme == "B8ZS":
-        res = run(bits, scheme, params, last_pulse_init=-1)
+    # Large sizes but still fast in pure-python/numpy
+    N = 30_000
+
+    if pattern == "all_zeros":
+        bits = [0] * N
+    elif pattern == "all_ones":
+        bits = [1] * N
+    elif pattern == "alt_01":
+        bits = [0, 1] * (N // 2)
+    elif pattern == "alt_10":
+        bits = [1, 0] * (N // 2)
+    elif pattern == "bursty_zeros":
+        # worst-case for scramblers + line codes: long zero blocks + occasional ones
+        bits = [0] * 20_000 + [1] + [0] * 5_000 + [1] + [0] * 5_000
+    elif pattern == "long_runs_mixed":
+        # long runs of both symbols, plus transitions
+        bits = ([0] * 8000 + [1] * 8000) * 2 + ([0] * 2000 + [1] * 2000)
+    elif pattern == "random_seeded":
+        rng = random.Random(2026)
+        bits = [rng.randint(0, 1) for _ in range(N)]
     else:
-        res = run(bits, scheme, params, last_pulse_init=-1, hdb3_nonzero_since_violation_init=0)
+        raise ValueError("Unknown pattern")
 
-    assert_match(res, f"{scheme} long-run mismatch")
+    # Scheme-specific kwargs to stress initial-condition paths too
+    kwargs = {}
+    if scheme == "NRZI":
+        kwargs["nrzi_start_level"] = -1
+    elif scheme == "Differential Manchester":
+        kwargs["diff_start_level"] = +1.0
+    elif scheme in ("Bipolar-AMI", "B8ZS"):
+        kwargs["last_pulse_init"] = -1
+    elif scheme == "Pseudoternary":
+        kwargs["last_zero_pulse_init"] = -1
+    elif scheme == "HDB3":
+        kwargs["last_pulse_init"] = -1
+        kwargs["hdb3_nonzero_since_violation_init"] = 0
+
+    res = run(bits, scheme, params, **kwargs)
+    assert_match(res, f"{scheme} long-run mismatch (pattern={pattern})")
+
+    # Extra sanity: must preserve length exactly
+    assert len(res.bits["decoded"]) == len(bits)
+    assert len(res.signals["tx"]) == len(res.t)
