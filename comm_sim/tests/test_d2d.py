@@ -1,3 +1,65 @@
+# test_d2d.py
+#
+# Digital → Digital (D2D) line coding / scrambling unit tests for `simulate_d2d(...)`.
+#
+# What this test suite verifies
+# -----------------------------
+# 1) Roundtrip correctness (core requirement)
+#    - For every supported D2D scheme, encoding followed by decoding must reproduce the original bits.
+#
+# 2) Scheme coverage + aliases
+#    - Main schemes: NRZ-L, NRZI, Manchester, Differential Manchester,
+#                    Bipolar-AMI, Pseudoternary, B8ZS, HDB3
+#    - Also tests implementation aliases (e.g., "AMI", "DiffManchester") to ensure they map correctly.
+#
+# 3) Sampling / Ns behavior (including odd Ns)
+#    - Manchester-family encoders require an even number of samples/bit (Ns). The implementation may
+#      internally adjust odd Ns to even and records the adjusted value in metadata.
+#    - Tests explicitly include odd Ns to ensure adjustment + decoding still works.
+#
+# 4) Signal-level invariants (waveform correctness)
+#    - Binary schemes (NRZ-L/NRZI/Manchester/Diff Manchester) must use only levels {+1, -1}.
+#    - Ternary schemes (AMI/Pseudoternary/B8ZS/HDB3) must use only levels {+1, 0, -1}.
+#
+# 5) Structural invariants (per-bit transition rules)
+#    - NRZ-L: verifies the bit→level convention used by the simulator.
+#    - NRZI: verifies “1 causes transition, 0 causes no transition” with configurable start level.
+#    - Manchester: verifies there is always a mid-bit transition and the correct half-bit polarity rule.
+#    - Differential Manchester: verifies the start-of-bit transition depends on the bit value and the
+#      mid-bit transition always occurs, with configurable start level.
+#
+# 6) Scrambler/descrambler correctness (B8ZS / HDB3)
+#    - B8ZS:
+#        • exact 8-zero substitution pattern
+#        • correct substitution counts in long all-zero runs
+#        • overlap boundary behavior (e.g., 9 zeros)
+#        • avoids false positives when <8 consecutive zeros
+#    - HDB3:
+#        • rule selection depends on parity (B00V vs 000V)
+#        • parity-sensitive cases (e.g., "100001")
+#        • correct substitution counts for long all-zero runs
+#        • avoids false positives on tricky “looks similar” patterns
+#
+# 7) Metadata consistency
+#    - Ensures encode-time substitution positions align with decode-time descramble hit positions.
+#
+# 8) Deterministic fuzz testing (seeded)
+#    - Broad coverage across many random bitstreams and lengths to catch boundary and state issues.
+#
+# 9) Long-run stress tests (ALL schemes)
+#    - Runs large bitstreams with adversarial patterns:
+#        • all_zeros, all_ones
+#        • alternating patterns
+#        • bursty zeros (worst-case for scramblers)
+#        • long runs mixed (very long blocks of 0s then 1s)
+#        • random_seeded
+#    - Uses scheme-specific initial-condition kwargs to exercise stateful paths consistently.
+#
+# How to run
+# ----------
+#   pytest -q comm_sim/tests/test_d2d.py
+
+
 import random
 from typing import Dict, List
 

@@ -1,3 +1,60 @@
+# test_d2a.py
+#
+# Digital → Analog (D2A) modulation/demodulation unit tests for `simulate_d2a(...)`.
+#
+# What this test suite verifies
+# -----------------------------
+# 1) Roundtrip correctness (core requirement)
+#    - For each supported D2A scheme, verify that decoded bits match the original input bits
+#      under “reasonable / safe” parameter regimes (adequate sampling, tones under Nyquist, etc.).
+#
+# 2) Scheme coverage (including legacy)
+#    - Main schemes: ASK, BFSK, MFSK, BPSK, DPSK, QPSK, QAM
+#    - Legacy scheme still supported in code: 16QAM (tested to prevent regressions)
+#
+# 3) Padding + trimming behavior
+#    - QPSK consumes 2 bits/symbol → odd-length inputs are padded internally, then trimmed back
+#    - QAM consumes k bits/symbol (depends on axis_levels) → input may be padded then trimmed back
+#    - Tests confirm `decoded_len == input_len` and match holds after trimming.
+#
+# 4) Internal meta/invariant checks (sanity beyond “just match”)
+#    - Validates key `res.meta` fields exist and are consistent.
+#    - Checks “expected behavior” signals for each scheme, for example:
+#        • ASK: A_hat tracks the chosen amplitude levels
+#        • BFSK: correct tone tends to have higher energy (E0/E1 separation) and swapping f0/f1 is handled
+#        • MFSK: chosen_idx aligns with transmitted symbol index under clean conditions
+#        • BPSK: I_hat sign matches antipodal phases (standard case)
+#        • DPSK: delta_hat clusters near {0, ±Δ} (wrapped phase difference)
+#        • QPSK: I_hat and Q_hat have non-trivial magnitude (not collapsing to ~0)
+#        • QAM: I_dec/Q_dec belong to the allowed decision levels for axis_levels (2 or 4)
+#
+# 5) Warning-path coverage (tests for “expected warnings”, not failures)
+#    - Nyquist/aliasing warnings (e.g., fc >= fs/2)
+#    - Very small Ns warnings
+#    - “non-positive frequency” warnings (invalid tone sets)
+#    - ASK ambiguous threshold warnings (A1 <= A0)
+#
+# 6) Deterministic fuzz testing (seeded)
+#    - Generates random bitstreams and randomized (but generally safe) parameters per scheme.
+#    - Important exception:
+#        If the simulator warns about “non-positive frequency”, the case can be fundamentally ambiguous
+#        in a real-cosine model (cos(2π(-f)t) == cos(2π f t)). In that situation, mismatch is acceptable,
+#        and the fuzz test does not assert match (it still exercises the code path).
+#
+# 7) Long-run stress tests (ALL schemes)
+#    - Large bitstreams with multiple adversarial patterns:
+#        • all_zeros, all_ones
+#        • alternating patterns (0101…, 1010…)
+#        • bursty patterns (long runs + short bursts)
+#        • long_runs (very long blocks of 0s then 1s)
+#        • random_seeded
+#    - Uses stable, safe defaults per scheme to avoid “invalid parameter” ambiguity during stress.
+#
+# How to run
+# ----------
+#   pytest -q comm_sim/tests/test_d2a.py
+
+
 from __future__ import annotations
 
 import random
