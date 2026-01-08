@@ -1056,6 +1056,56 @@ elif mode == "Digital → Analog":
                     "Value": st.column_config.TextColumn("Value", width="small"),
                 },
             )
+        
+        if scheme == "QPSK":
+            phi_ref = st.slider(
+                "Constellation rotation φ_ref (rad)",
+                float(-np.pi),
+                float(np.pi),
+                0.0,      # IMPORTANT: default 0 keeps book phases exactly (±π/4, ±3π/4)
+                step=0.01,
+            )
+            kwargs["phi_ref"] = float(phi_ref)
+
+            # Table: bits -> (I,Q) -> phase = φ_ref + atan2(Q,I)
+            entries = [
+                {"Bits": "11", "I": +1, "Q": +1},
+                {"Bits": "01", "I": -1, "Q": +1},
+                {"Bits": "00", "I": -1, "Q": -1},
+                {"Bits": "10", "I": +1, "Q": -1},
+            ]
+            rows = []
+            for e in entries:
+                I = float(e["I"])
+                Q = float(e["Q"])
+                phase = float(phi_ref + np.arctan2(Q, I))
+                # wrap to (-pi, pi] for nicer display
+                phase = (phase + np.pi) % (2 * np.pi) - np.pi
+                rows.append({
+                    "Bits": e["Bits"],
+                    "I level": f"{I:.0f}",
+                    "Q level": f"{Q:.0f}",
+                    "Phase (rad)": f"{phase:.2f}",
+                })
+
+            st.markdown(
+                "<div style='font-size:0.85rem; opacity:0.75; margin-top:0.25rem;'>"
+                "Book mapping (Eq. 5.7) is obtained when φ_ref = 0."
+                "</div>",
+                unsafe_allow_html=True,
+            )
+            df = pd.DataFrame(rows)
+            st.dataframe(
+                df,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Bits": st.column_config.TextColumn("Bits", width="small"),
+                    "I level": st.column_config.TextColumn("I level", width="small"),
+                    "Q level": st.column_config.TextColumn("Q level", width="small"),
+                    "Phase (rad)": st.column_config.TextColumn("Phase (rad)", width="small"),
+                },
+            )
 
         current_sig = make_signature(
             "d2a", params,
@@ -1177,6 +1227,10 @@ elif mode == "Digital → Analog":
                         if pk in dem2 and isinstance(dem2[pk], (int, float, np.floating)):
                             dem2[pk] = f"{float(dem2[pk]):.2f}"
                 
+                if dem2.get("scheme") == "QPSK":
+                    if "phi_ref" in dem2 and isinstance(dem2["phi_ref"], (int, float, np.floating)):
+                        dem2["phi_ref"] = f"{float(dem2['phi_ref']):.2f}"
+
                 # 3) Keep your existing “simple vs event list” logic
                 simple = {}
                 event_lists = {}

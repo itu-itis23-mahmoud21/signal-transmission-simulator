@@ -305,6 +305,7 @@ def modulate(bits: List[int], scheme: str, params: SimParams, **kwargs) -> Tuple
         Q_levels: List[float] = []
         sym_bits: List[Tuple[int, int]] = []
         warnings += _warn_params(params, extra_freqs=[])
+        phi_ref = float(kwargs.get("phi_ref", 0.0))
 
         for k in range(nsym):
             b0, b1 = bits2[2 * k], bits2[2 * k + 1]
@@ -315,11 +316,12 @@ def modulate(bits: List[int], scheme: str, params: SimParams, **kwargs) -> Tuple
 
             a, z = k * Ns_sym, (k + 1) * Ns_sym
             seg_t = t2[a:z]
-            c = np.cos(2 * np.pi * fc * seg_t)
-            sn = np.sin(2 * np.pi * fc * seg_t)
+            c = np.cos(2 * np.pi * fc * seg_t + phi_ref)
+            sn = np.sin(2 * np.pi * fc * seg_t + phi_ref)
             s[a:z] = (Ac / np.sqrt(2.0)) * (I * c - Q * sn)
 
         meta.update({
+            "phi_ref": phi_ref,
             "pad_bits": pad,
             "symbols": nsym,
             "sym_bits": sym_bits,
@@ -583,6 +585,7 @@ def demodulate(s_t: np.ndarray, scheme: str, params: SimParams, **kwargs) -> Tup
         return bits_out, meta
 
     if scheme == "QPSK":
+        phi_ref = float(kwargs.get("phi_ref", 0.0))
         Ns_sym = 2 * Ns
         nsym = N // Ns_sym
         warnings += _warn_params(params, extra_freqs=[])
@@ -596,7 +599,11 @@ def demodulate(s_t: np.ndarray, scheme: str, params: SimParams, **kwargs) -> Tup
             seg = s_t[a:z]
             seg_t = t[a:z]
 
-            I, Q = _iq_correlator(seg, seg_t, fc)
+            n = len(seg)
+            c = np.cos(2 * np.pi * fc * seg_t + phi_ref)
+            s = np.sin(2 * np.pi * fc * seg_t + phi_ref)
+            I = (2.0 / n) * float(np.dot(seg, c))
+            Q = (2.0 / n) * float(np.dot(seg, s))
 
             den = (Ac if Ac != 0 else 1.0)
 
@@ -614,7 +621,7 @@ def demodulate(s_t: np.ndarray, scheme: str, params: SimParams, **kwargs) -> Tup
             b0, b1 = _QPSK_INV[(si, sq)]
             bits_out.extend([b0, b1])
 
-        meta.update({"symbols": nsym, "I_hat": I_hat, "Q_hat": Q_hat, "warnings": warnings})
+        meta.update({"phi_ref": phi_ref, "symbols": nsym, "I_hat": I_hat, "Q_hat": Q_hat, "warnings": warnings})
         return bits_out, meta
 
     if scheme == "16QAM":
