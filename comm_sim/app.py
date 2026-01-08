@@ -838,10 +838,6 @@ elif mode == "Digital → Analog":
             if np.isclose(A0, A1):
                 st.error("Invalid ASK: A0 and A1 cannot be equal (no amplitude difference to detect).")
                 invalid_params = True
-            elif A1 < A0:
-                st.warning("ASK note: A1 < A0 (bit '1' weaker than bit '0'). This is unusual and may confuse users.")
-                # If you want to completely disallow this too, uncomment:
-                # invalid_params = True
 
         if scheme == "BFSK":
             nyq = float(params.fs) / 2.0
