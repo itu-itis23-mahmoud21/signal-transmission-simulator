@@ -1,11 +1,11 @@
 import os
 import random
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 import numpy as np
 import pytest
 
-from utils import SimParams, ensure_even
+from utils import SimParams
 from d2d import simulate_d2d
 
 
