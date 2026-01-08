@@ -22,6 +22,10 @@ st.markdown(
             display: none !important;
         }
 
+        header[data-testid="stHeader"] {
+            background: transparent !important;
+        }
+
         section[data-testid="stMain"] > div[data-testid="stMainBlockContainer"]{
             padding-top: 2.4rem !important;
             padding-left: 3rem !important;
