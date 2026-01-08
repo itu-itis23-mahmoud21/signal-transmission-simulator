@@ -373,7 +373,7 @@ def render_events_table(events: list, *, width: int = 850):
         width=width,
     )
 
-def empty_state(message: str = "Click **Run simulation** from the sidebar to see results."):
+def empty_state(message: str = "Choose a scheme, optionally generate bits, then click **Run simulation**."):
     # Centered, friendly placeholder
     st.markdown(
         """
@@ -635,7 +635,7 @@ if mode == "Digital → Digital":
     res = st.session_state.get("d2d_last", None)
 
     if res is None:
-        empty_state("Choose a scheme, optionally generate bits, then click **Run simulation**.")
+        empty_state()
     else:
         summary_block({**res.meta, "fs": params.fs, "Tb": params.Tb, "samples_per_bit": params.samples_per_bit})
 
@@ -1280,7 +1280,7 @@ elif mode == "Digital → Analog":
     res = st.session_state.get("d2a_last", None)
     
     if res is None:
-        empty_state("Pick a modulation, then click **Run simulation** to generate the waveforms.")
+        empty_state()
     else:
         summary_block({**res.meta, "fs": params.fs, "fc": params.fc, "Tb": params.Tb, "samples_per_bit": params.samples_per_bit})
 
@@ -1630,6 +1630,11 @@ elif mode == "Analog → Digital":
 
         run = st.button("Run simulation", type="primary")
 
+    # Keep last result
+    if "a2d_last" not in st.session_state:
+        st.session_state["a2d_last"] = None
+
+    # Run only on click, then store
     if run:
         res = simulate_a2d(
             kind, technique, params,
@@ -1637,13 +1642,22 @@ elif mode == "Analog → Digital":
             fs_mult=int(fs_mult),
             pcm_nbits=int(pcm_nbits),
             dm_delta=float(dm_delta),
-            linecode_scheme=linecode_scheme
+            linecode_scheme=linecode_scheme,
         )
+        st.session_state["a2d_last"] = res
 
+    # Always display either empty state or last result
+    res = st.session_state.get("a2d_last", None)
+    if res is None:
+        empty_state()
+    else:
         tab1, tab3, tab4 = st.tabs(["Waveforms", "Steps", "Details"])
 
         with tab1:
-            st.plotly_chart(plot_signal(res.t, res.signals["m(t)"], "Message m(t)", grid=show_grid), width='stretch')
+            st.plotly_chart(
+                plot_signal(res.t, res.signals["m(t)"], "Message m(t)", grid=show_grid),
+                width="stretch",
+            )
 
             # sampled points
             t_s = res.meta["sampled"]["t_s"]
@@ -1652,26 +1666,32 @@ elif mode == "Analog → Digital":
             fig.add_trace(go.Scatter(x=res.t, y=res.signals["m(t)"], mode="lines", name="m(t)"))
             fig.add_trace(go.Scatter(x=t_s, y=m_s, mode="markers", name="Samples"))
             fig.update_layout(title="Message with sampled points", xaxis_title="Time (s)", yaxis_title="Amplitude")
-            st.plotly_chart(fig, width='stretch')
+            st.plotly_chart(fig, width="stretch")
 
             if technique == "PCM":
                 q = res.meta["quantized"]["q"]
                 fig2 = go.Figure()
                 fig2.add_trace(go.Scatter(x=t_s, y=q, mode="lines", line_shape="hv", name="Quantized (stair)"))
                 fig2.update_layout(title="PCM Quantized Staircase", xaxis_title="Time (s)", yaxis_title="Amplitude")
-                st.plotly_chart(fig2, width='stretch')
+                st.plotly_chart(fig2, width="stretch")
             else:
                 stair = res.meta["stair"]["stair"]
                 fig2 = go.Figure()
                 fig2.add_trace(go.Scatter(x=t_s, y=stair, mode="lines", line_shape="hv", name="DM Staircase"))
                 fig2.update_layout(title="Delta Modulation Staircase", xaxis_title="Time (s)", yaxis_title="Amplitude")
-                st.plotly_chart(fig2, width='stretch')
+                st.plotly_chart(fig2, width="stretch")
 
             t_bits = res.meta["t_bits"]
             st.plotly_chart(
-                plot_signal(t_bits, res.signals["linecode"], f"Line-coded bitstream ({linecode_scheme})",
-                            grid=show_grid, x_dtick=params.Tb, y_dtick=1),
-                width='stretch'
+                plot_signal(
+                    t_bits,
+                    res.signals["linecode"],
+                    f"Line-coded bitstream ({linecode_scheme})",
+                    grid=show_grid,
+                    x_dtick=params.Tb,
+                    y_dtick=1,
+                ),
+                width="stretch",
             )
 
         with tab3:
@@ -1696,7 +1716,6 @@ elif mode == "Analog → Analog":
         duration = st.slider("Duration (s)", 0.5, 5.0, 2.0, step=0.5)
 
         st.subheader("Carrier/sampling")
-        # For analog modes, we want a higher fs than digital fs:
         fs_a = st.select_slider("Sampling rate fs (Hz)", options=[2000, 5000, 10000, 20000], value=10000)
         fc_ratio = st.slider("Carrier ratio fc/fm", 5, 50, 20)
         fc_a = fc_ratio * fm
@@ -1715,16 +1734,36 @@ elif mode == "Analog → Analog":
 
         run = st.button("Run simulation", type="primary")
 
-    if run:
-        aparams = SimParams(fs=float(fs_a), Tb=params.Tb, samples_per_bit=params.samples_per_bit, Ac=float(Ac_a), fc=float(fc_a))
-        res = simulate_a2a(kind, scheme, aparams, Am=Am, fm=fm, duration=duration, ka=ka, kf=kf, kp=kp)
+    # Keep last result
+    if "a2a_last" not in st.session_state:
+        st.session_state["a2a_last"] = None
 
+    # Run only on click, then store
+    if run:
+        aparams = SimParams(
+            fs=float(fs_a),
+            Tb=params.Tb,
+            samples_per_bit=params.samples_per_bit,
+            Ac=float(Ac_a),
+            fc=float(fc_a),
+        )
+        res = simulate_a2a(kind, scheme, aparams, Am=Am, fm=fm, duration=duration, ka=ka, kf=kf, kp=kp)
+        st.session_state["a2a_last"] = res
+
+    # Always display either empty state or last result
+    res = st.session_state.get("a2a_last", None)
+    if res is None:
+        empty_state()
+    else:
         tab1, tab3, tab4 = st.tabs(["Waveforms", "Steps", "Details"])
 
         with tab1:
-            st.plotly_chart(plot_signal(res.t, res.signals["m(t)"], "Message m(t)", grid=show_grid), width='stretch')
-            st.plotly_chart(plot_signal(res.t, res.signals["tx"], f"Modulated signal ({scheme})", grid=show_grid, x_dtick=params.Tb, y_dtick=1), width='stretch')
-            st.plotly_chart(plot_signal(res.t, res.signals["recovered"], "Recovered message", grid=show_grid), width='stretch')
+            st.plotly_chart(plot_signal(res.t, res.signals["m(t)"], "Message m(t)", grid=show_grid), width="stretch")
+            st.plotly_chart(
+                plot_signal(res.t, res.signals["tx"], f"Modulated signal ({scheme})", grid=show_grid, x_dtick=params.Tb, y_dtick=1),
+                width="stretch",
+            )
+            st.plotly_chart(plot_signal(res.t, res.signals["recovered"], "Recovered message", grid=show_grid), width="stretch")
 
         with tab3:
             st.json(res.meta)
