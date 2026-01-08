@@ -1192,6 +1192,7 @@ elif mode == "Digital → Analog":
                 # Pull A_hat out so it doesn't appear as one huge list in the main table
                 a_hat = dem2.pop("A_hat", None)
                 i_hat = dem2.pop("I_hat", None)
+                q_hat = dem2.pop("Q_hat", None)
                 phi_hat = dem2.pop("phi_hat", None)
                 delta_hat = dem2.pop("delta_hat", None)
                 warnings_list = dem2.pop("warnings", None)
@@ -1264,6 +1265,11 @@ elif mode == "Digital → Analog":
                         rows = [{"bit_index": i, "I_hat": f"{float(v):.2f}"} for i, v in enumerate(i_hat)]
                         render_events_table(rows, width=1000)
 
+                if isinstance(q_hat, list):
+                    with st.expander("Q_hat (quadrature correlator per bit)", expanded=True):
+                        rows = [{"bit_index": i, "Q_hat": f"{float(v):.2f}"} for i, v in enumerate(q_hat)]
+                        render_events_table(rows, width=1000)
+                
                 if isinstance(phi_hat, list):
                     with st.expander("phi_hat (estimated absolute phase per bit)", expanded=False):
                         rows = [{"bit_index": i, "phi_hat (rad)": f"{float(v):.2f}"} for i, v in enumerate(phi_hat)]
