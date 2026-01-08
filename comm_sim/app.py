@@ -13,7 +13,11 @@ from d2a import simulate_d2a
 from a2d import simulate_a2d
 from a2a import simulate_a2a
 
-st.set_page_config(layout="wide")
+st.set_page_config(
+    page_title="Transmission Simulator",
+    page_icon="🛰️",
+    layout="wide",
+)
 
 st.markdown(
     """
