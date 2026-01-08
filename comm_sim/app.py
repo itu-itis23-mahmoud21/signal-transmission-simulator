@@ -1045,12 +1045,12 @@ elif mode == "Digital → Analog":
                 dem2.pop("E0", None)
                 dem2.pop("E1", None)
 
-                # BFSK-specific formatting (no E0/E1 display)
+                # BFSK-specific formatting
                 if dem2.get("scheme") == "BFSK":
-                    for fk in ("f0_requested", "f1_requested", "f0", "f1"):
+                    for fk in ("f0", "f1"):
                         if fk in dem2 and isinstance(dem2[fk], (int, float, np.floating)):
                             dem2[fk] = f"{float(dem2[fk]):.2f}"
-
+                
                 # 3) Keep your existing “simple vs event list” logic
                 simple = {}
                 event_lists = {}
