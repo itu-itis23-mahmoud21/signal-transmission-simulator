@@ -1005,7 +1005,16 @@ elif mode == "Digital → Analog":
                 {"Item": "Phase separation |Δφ| = |φ0−φ1|", "Value": f"{abs(float(dphi)):.3f} rad"},
                 {"Item": "Antipodal? (|Δφ| = π)", "Value": str(bool(np.isclose(abs(dphi), np.pi, atol=1e-2)))},
             ]
-            render_events_table(rows, width=700)
+            df = pd.DataFrame(rows)
+            st.dataframe(
+                df,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Item": st.column_config.TextColumn("Item", width="medium"),
+                    "Value": st.column_config.TextColumn("Value", width="small"),
+                },
+            )
 
         current_sig = make_signature(
             "d2a", params,
