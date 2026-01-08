@@ -317,7 +317,7 @@ def modulate(bits: List[int], scheme: str, params: SimParams, **kwargs) -> Tuple
             seg_t = t2[a:z]
             c = np.cos(2 * np.pi * fc * seg_t)
             sn = np.sin(2 * np.pi * fc * seg_t)
-            s[a:z] = Ac * (I * c + Q * sn)
+            s[a:z] = (Ac / np.sqrt(2.0)) * (I * c - Q * sn)
 
         meta.update({
             "pad_bits": pad,
@@ -597,13 +597,20 @@ def demodulate(s_t: np.ndarray, scheme: str, params: SimParams, **kwargs) -> Tup
             seg_t = t[a:z]
 
             I, Q = _iq_correlator(seg, seg_t, fc)
-            I_norm = I / (Ac if Ac != 0 else 1.0)
-            Q_norm = Q / (Ac if Ac != 0 else 1.0)
-            I_hat.append(float(I_norm))
-            Q_hat.append(float(Q_norm))
 
-            si = _sign01(I_norm)
-            sq = _sign01(Q_norm)
+            den = (Ac if Ac != 0 else 1.0)
+
+            # With book-form TX: seg = (Ac/√2)*(I*cos - Q*sin)
+            # Correlator gives: I_corr ≈ (Ac/√2)*I,  Q_corr ≈ (Ac/√2)*(-Q)
+            # So recover the symbol signs as:
+            I_sym = (I * np.sqrt(2.0)) / den
+            Q_sym = (-Q * np.sqrt(2.0)) / den
+
+            I_hat.append(float(I_sym))
+            Q_hat.append(float(Q_sym))
+
+            si = _sign01(I_sym)
+            sq = _sign01(Q_sym)
             b0, b1 = _QPSK_INV[(si, sq)]
             bits_out.extend([b0, b1])
 
