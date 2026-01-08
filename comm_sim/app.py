@@ -948,10 +948,11 @@ elif mode == "Digital → Analog":
 
             fd = st.slider("Frequency difference fd (Hz)", 0.1, float(fd_max), float(fd_default), step=0.1)
 
-            # Show the tone set (optional)
+            # Show the tone set
             freqs = [fc + (2 * (i + 1) - 1 - M) * fd for i in range(M)]
-            with st.expander("Show MFSK tone frequencies"):
-                st.write(freqs)
+            with st.expander("MFSK tone frequencies"):
+                rows = [{"tone_index": i, "f_i (Hz)": f"{float(f):.2f}"} for i, f in enumerate(freqs)]
+                render_events_table(rows, width=700)
 
             kwargs["L"] = int(L)
             kwargs["fd"] = float(fd)
@@ -1045,6 +1046,18 @@ elif mode == "Digital → Analog":
                 dem2.pop("E0", None)
                 dem2.pop("E1", None)
 
+                # MFSK: format fd to 2 decimals
+                if dem2.get("scheme") == "MFSK" and "fd" in dem2 and isinstance(dem2["fd"], (int, float, np.floating)):
+                    dem2["fd"] = f"{float(dem2['fd']):.2f}"
+
+                # MFSK: remove heavy lists from the main Steps table (keep internally in meta)
+                mfsk_freqs = None
+                mfsk_chosen = None
+                if dem2.get("scheme") == "MFSK":
+                    mfsk_freqs = dem2.pop("freqs", None)
+                    mfsk_chosen = dem2.pop("chosen_idx", None)
+                    dem2.pop("energies", None)  # hide from Steps tab only
+
                 # BFSK-specific formatting
                 if dem2.get("scheme") == "BFSK":
                     for fk in ("f0", "f1"):
@@ -1061,6 +1074,17 @@ elif mode == "Digital → Analog":
                         simple[k] = v
 
                 dict_to_pretty_table(simple, width=700)
+
+                # MFSK: show freqs and chosen_idx as separate tables
+                if isinstance(mfsk_freqs, list):
+                    with st.expander("freqs (tone set)", expanded=True):
+                        rows = [{"tone_index": i, "f_i (Hz)": f"{float(f):.2f}"} for i, f in enumerate(mfsk_freqs)]
+                        render_events_table(rows, width=900)
+
+                if isinstance(mfsk_chosen, list):
+                    with st.expander("chosen_idx (detected tone index per symbol)", expanded=True):
+                        rows = [{"symbol_index": i, "chosen_idx": int(idx)} for i, idx in enumerate(mfsk_chosen)]
+                        render_events_table(rows, width=900)
 
                 # 4) Show A_hat as a separate table (cleaner + controlled decimals)
                 if isinstance(a_hat, list):
