@@ -277,7 +277,6 @@ def summary_block(meta: dict):
     st.dataframe(
         styler,
         hide_index=True,
-        use_container_width=False,
         width=700, 
     )
 
@@ -311,7 +310,6 @@ def dict_to_pretty_table(data: dict, *, width: int = 700):
     st.dataframe(
         styler,
         hide_index=True,
-        use_container_width=False,
         width=width,
     )
 
@@ -369,7 +367,6 @@ def render_events_table(events: list, *, width: int = 850):
     st.dataframe(
         styler,
         hide_index=True,
-        use_container_width=False,
         width=width,
     )
 
@@ -1055,7 +1052,7 @@ elif mode == "Digital → Analog":
             df = pd.DataFrame(rows)
             st.dataframe(
                 df,
-                use_container_width=True,
+                width='stretch',
                 hide_index=True,
                 column_config={
                     "Item": st.column_config.TextColumn("Item", width="medium"),
@@ -1083,7 +1080,7 @@ elif mode == "Digital → Analog":
             df = pd.DataFrame(rows)
             st.dataframe(
                 df,
-                use_container_width=True,
+                width='stretch',
                 hide_index=True,
                 column_config={
                     "Item": st.column_config.TextColumn("Item", width="medium"),
@@ -1131,7 +1128,7 @@ elif mode == "Digital → Analog":
             df = pd.DataFrame(rows)
             st.dataframe(
                 df,
-                use_container_width=True,
+                width='stretch',
                 hide_index=True,
                 column_config={
                     "Bits": st.column_config.TextColumn("Bits", width="small"),
@@ -1193,7 +1190,7 @@ elif mode == "Digital → Analog":
                 df = pd.DataFrame(rows)
                 st.dataframe(
                     df,
-                    use_container_width=True,
+                    width='stretch',
                     hide_index=True,
                     column_config={
                         "Bits (I,Q)": st.column_config.TextColumn("Bits (I,Q)", width="small"),
@@ -1221,7 +1218,7 @@ elif mode == "Digital → Analog":
                 df = pd.DataFrame(axis_rows)
                 st.dataframe(
                     df,
-                    use_container_width=True,
+                    width='stretch',
                     hide_index=True,
                     column_config={
                         "Axis bits": st.column_config.TextColumn("Axis bits", width="small"),
