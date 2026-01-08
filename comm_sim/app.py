@@ -862,8 +862,8 @@ if mode == "Digital → Digital":
 elif mode == "Digital → Analog":
     with st.sidebar:
         st.subheader("Technique")
-        label = st.selectbox("Modulation Technique", ["ASK", "BFSK", "MFSK", "BPSK", "DPSK", "QPSK", "16-QAM"])
-        scheme = "16QAM" if label == "16-QAM" else label
+        label = st.selectbox("Modulation Technique", ["ASK", "BFSK", "MFSK", "BPSK", "DPSK", "QPSK", "QAM"])
+        scheme = label
 
         st.subheader("Technique parameters")
         kwargs = {}
@@ -1141,6 +1141,94 @@ elif mode == "Digital → Analog":
                 },
             )
 
+        if scheme == "QAM":
+            qam_variant = st.radio(
+                "QAM variant",
+                ["2-level ASK (QAM)", "4-level ASK (16-QAM)"],
+                index=0,
+                horizontal=True,
+            )
+
+            axis_levels = 2 if qam_variant.startswith("2-level") else 4
+            kwargs["axis_levels"] = int(axis_levels)
+
+            phi_ref = st.slider(
+                "Constellation rotation φ_ref (rad)",
+                float(-np.pi),
+                float(np.pi),
+                0.0,
+                step=0.01,
+            )
+            kwargs["phi_ref"] = float(phi_ref)
+
+            st.markdown(
+                "<div style='font-size:0.85rem; opacity:0.75; margin-top:0.25rem;'>"
+                "Book form: s(t) = d1(t) cos(2πfct) + d2(t) sin(2πfct). "
+                "Input is split into I/Q streams by taking alternate bits."
+                "</div>",
+                unsafe_allow_html=True,
+            )
+
+            if axis_levels == 2:
+                # 2-level: show 4 states (I,Q) in {-1,+1}
+                entries = [
+                    {"Bits (I,Q)": "00", "d1": -1, "d2": -1},
+                    {"Bits (I,Q)": "01", "d1": -1, "d2": +1},
+                    {"Bits (I,Q)": "10", "d1": +1, "d2": -1},
+                    {"Bits (I,Q)": "11", "d1": +1, "d2": +1},
+                ]
+                rows = []
+                for e in entries:
+                    d1 = float(e["d1"])
+                    d2 = float(e["d2"])
+                    phase = float(phi_ref + np.arctan2(d2, d1))
+                    phase = (phase + np.pi) % (2 * np.pi) - np.pi
+                    rows.append({
+                        "Bits (I,Q)": e["Bits (I,Q)"],
+                        "d1": f"{d1:.0f}",
+                        "d2": f"{d2:.0f}",
+                        "Phase": f"{phase:.2f} ≈ {phase_as_pi_frac(phase)} rad",
+                    })
+
+                df = pd.DataFrame(rows)
+                st.dataframe(
+                    df,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Bits (I,Q)": st.column_config.TextColumn("Bits (I,Q)", width="small"),
+                        "d1": st.column_config.TextColumn("d1", width="small"),
+                        "d2": st.column_config.TextColumn("d2", width="small"),
+                        "Phase": st.column_config.TextColumn("Phase", width="medium"),
+                    },
+                )
+
+            else:
+                # 16-QAM: show per-axis Gray mapping table (2 bits -> level)
+                axis_rows = [
+                    {"Axis bits": "00", "Level": "-3"},
+                    {"Axis bits": "01", "Level": "-1"},
+                    {"Axis bits": "11", "Level": "+1"},
+                    {"Axis bits": "10", "Level": "+3"},
+                ]
+                st.markdown(
+                    "<div style='font-size:0.85rem; opacity:0.75; margin-top:0.25rem;'>"
+                    "16-QAM uses 4 levels per axis (Gray). One symbol uses 4 input bits in book order: "
+                    "[I0, Q0, I1, Q1]. (I stream = 1st,3rd,5th,... bits; Q stream = 2nd,4th,6th,... bits.)"
+                    "</div>",
+                    unsafe_allow_html=True,
+                )
+                df = pd.DataFrame(axis_rows)
+                st.dataframe(
+                    df,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Axis bits": st.column_config.TextColumn("Axis bits", width="small"),
+                        "Level": st.column_config.TextColumn("Level", width="small"),
+                    },
+                )
+
         current_sig = make_signature(
             "d2a", params,
             bitstr=st.session_state["bitstr"].strip(),
@@ -1227,6 +1315,8 @@ elif mode == "Digital → Analog":
                 a_hat = dem2.pop("A_hat", None)
                 i_hat = dem2.pop("I_hat", None)
                 q_hat = dem2.pop("Q_hat", None)
+                i_dec = dem2.pop("I_dec", None)
+                q_dec = dem2.pop("Q_dec", None)
                 phi_hat = dem2.pop("phi_hat", None)
                 delta_hat = dem2.pop("delta_hat", None)
                 warnings_list = dem2.pop("warnings", None)
@@ -1302,6 +1392,16 @@ elif mode == "Digital → Analog":
                 if isinstance(q_hat, list):
                     with st.expander("Q_hat (quadrature correlator per bit)", expanded=True):
                         rows = [{"bit_index": i, "Q_hat": f"{float(v):.2f}"} for i, v in enumerate(q_hat)]
+                        render_events_table(rows, width=1000)
+
+                if isinstance(i_dec, list):
+                    with st.expander("I_dec (decided I levels per symbol)", expanded=False):
+                        rows = [{"symbol_index": i, "I_dec": f"{float(v):.2f}"} for i, v in enumerate(i_dec)]
+                        render_events_table(rows, width=1000)
+                
+                if isinstance(q_dec, list):
+                    with st.expander("Q_dec (decided Q levels per symbol)", expanded=False):
+                        rows = [{"symbol_index": i, "Q_dec": f"{float(v):.2f}"} for i, v in enumerate(q_dec)]
                         render_events_table(rows, width=1000)
 
                 if isinstance(phi_hat, list):

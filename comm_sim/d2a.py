@@ -91,6 +91,11 @@ _16QAM_AXIS_INV: Dict[float, Tuple[int, int]] = {
     +3.0: (1, 0),
 }
 
+# 2-level ASK per axis: bit -> level in {-1, +1}
+# book convention: binary 1 -> +1, binary 0 -> -1
+_2QAM_AXIS_MAP: Dict[int, float] = {0: -1.0, 1: +1.0}
+_2QAM_AXIS_INV: Dict[int, int] = {-1: 0, +1: 1}
+
 
 def _sign01(x: float) -> int:
     """Return +1 if x>=0 else -1."""
@@ -328,6 +333,86 @@ def modulate(bits: List[int], scheme: str, params: SimParams, **kwargs) -> Tuple
             "sym_bits": sym_bits,
             "I": I_levels,
             "Q": Q_levels,
+            "warnings": warnings,
+        })
+        return s, meta
+    
+    if scheme == "QAM":
+        # Variant selector: axis_levels = 2  (2-level ASK per axis => 4 states total)
+        #                 axis_levels = 4  (4-level ASK per axis => 16-QAM)
+        axis_levels = int(kwargs.get("axis_levels", 2))
+        phi_ref = float(kwargs.get("phi_ref", 0.0))
+
+        if axis_levels not in (2, 4):
+            raise ValueError("QAM: axis_levels must be 2 or 4.")
+
+        bits_per_axis = 1 if axis_levels == 2 else 2
+        bits_per_symbol = 2 * bits_per_axis
+
+        # Book convention: split into two streams by taking alternate bits (I=even positions, Q=odd positions)
+        bitsP, pad = _pad_bits(bits, bits_per_symbol)
+        I_stream = bitsP[0::2]
+        Q_stream = bitsP[1::2]
+
+        # Each symbol consumes bits_per_axis bits from I and bits_per_axis bits from Q
+        nsym = len(I_stream) // bits_per_axis
+        Ns_sym = bits_per_symbol * Ns
+        Nsym = nsym * Ns_sym
+        tS = make_time_axis(Nsym, fs)
+
+        # Levels + normalization
+        if axis_levels == 2:
+            norm = 1.0
+        else:
+            norm = 3.0  # same as existing 16QAM implementation
+
+        warnings += _warn_params(params, extra_freqs=[])
+
+        s = np.zeros(Nsym, dtype=float)
+        I_levels: List[float] = []
+        Q_levels: List[float] = []
+        sym_bits_interleaved: List[List[int]] = []
+
+        for k in range(nsym):
+            I_bits = I_stream[k * bits_per_axis:(k + 1) * bits_per_axis]
+            Q_bits = Q_stream[k * bits_per_axis:(k + 1) * bits_per_axis]
+
+            if axis_levels == 2:
+                I = _2QAM_AXIS_MAP[int(I_bits[0])]
+                Q = _2QAM_AXIS_MAP[int(Q_bits[0])]
+            else:
+                I = _16QAM_AXIS_MAP[(int(I_bits[0]), int(I_bits[1]))]
+                Q = _16QAM_AXIS_MAP[(int(Q_bits[0]), int(Q_bits[1]))]
+
+            I_levels.append(float(I))
+            Q_levels.append(float(Q))
+
+            # Store bits in the original *input order* per symbol: [I0, Q0, I1, Q1] (for 16-QAM)
+            inter = []
+            for j in range(bits_per_axis):
+                inter.append(int(I_bits[j]))
+                inter.append(int(Q_bits[j]))
+            sym_bits_interleaved.append(inter)
+
+            a, z = k * Ns_sym, (k + 1) * Ns_sym
+            seg_t = tS[a:z]
+            c = np.cos(2 * np.pi * fc * seg_t + phi_ref)
+            sn = np.sin(2 * np.pi * fc * seg_t + phi_ref)
+
+            # Book form: s(t) = d1(t) cos(...) + d2(t) sin(...)
+            s[a:z] = Ac * ((I / norm) * c + (Q / norm) * sn)
+
+        meta.update({
+            "axis_levels": axis_levels,
+            "bits_per_axis": bits_per_axis,
+            "bits_per_symbol": bits_per_symbol,
+            "phi_ref": phi_ref,
+            "pad_bits": pad,
+            "symbols": nsym,
+            "sym_bits": sym_bits_interleaved,
+            "I": I_levels,
+            "Q": Q_levels,
+            "norm": norm,
             "warnings": warnings,
         })
         return s, meta
@@ -623,6 +708,85 @@ def demodulate(s_t: np.ndarray, scheme: str, params: SimParams, **kwargs) -> Tup
             bits_out.extend([b0, b1])
 
         meta.update({"phi_ref": phi_ref, "symbols": nsym, "I_hat": I_hat, "Q_hat": Q_hat, "warnings": warnings})
+        return bits_out, meta
+    
+    if scheme == "QAM":
+        axis_levels = int(kwargs.get("axis_levels", 2))
+        phi_ref = float(kwargs.get("phi_ref", 0.0))
+
+        if axis_levels not in (2, 4):
+            raise ValueError("QAM: axis_levels must be 2 or 4.")
+
+        bits_per_axis = 1 if axis_levels == 2 else 2
+        bits_per_symbol = 2 * bits_per_axis
+
+        Ns_sym = bits_per_symbol * Ns
+        nsym = N // Ns_sym
+
+        norm = 1.0 if axis_levels == 2 else 3.0
+        warnings += _warn_params(params, extra_freqs=[])
+
+        bits_out: List[int] = []
+        I_hat: List[float] = []
+        Q_hat: List[float] = []
+        I_dec: List[float] = []
+        Q_dec: List[float] = []
+
+        for k in range(nsym):
+            a, z = k * Ns_sym, (k + 1) * Ns_sym
+            seg = s_t[a:z]
+            seg_t = t[a:z]
+            n = len(seg)
+
+            c = np.cos(2 * np.pi * fc * seg_t + phi_ref)
+            sref = np.sin(2 * np.pi * fc * seg_t + phi_ref)
+
+            Icorr = (2.0 / n) * float(np.dot(seg, c))
+            Qcorr = (2.0 / n) * float(np.dot(seg, sref))
+
+            den = (Ac if Ac != 0 else 1.0)
+
+            # Undo TX scaling: Icorr ≈ Ac*(I/norm), Qcorr ≈ Ac*(Q/norm)
+            I_level = (Icorr * norm) / den
+            Q_level = (Qcorr * norm) / den
+
+            I_hat.append(float(I_level))
+            Q_hat.append(float(Q_level))
+
+            if axis_levels == 2:
+                I_lv = +1.0 if I_level >= 0 else -1.0
+                Q_lv = +1.0 if Q_level >= 0 else -1.0
+                I_dec.append(float(I_lv))
+                Q_dec.append(float(Q_lv))
+
+                # Inverse to bits, then re-interleave as original input order: [I0, Q0]
+                bI = _2QAM_AXIS_INV[int(I_lv)]
+                bQ = _2QAM_AXIS_INV[int(Q_lv)]
+                bits_out.extend([bI, bQ])
+
+            else:
+                I_lv = _nearest_16qam_level(I_level)
+                Q_lv = _nearest_16qam_level(Q_level)
+                I_dec.append(float(I_lv))
+                Q_dec.append(float(Q_lv))
+
+                bI = _16QAM_AXIS_INV[I_lv]  # (2 bits)
+                bQ = _16QAM_AXIS_INV[Q_lv]  # (2 bits)
+
+                # Reconstruct original input order per symbol: [I0, Q0, I1, Q1]
+                bits_out.extend([bI[0], bQ[0], bI[1], bQ[1]])
+
+        meta.update({
+            "axis_levels": axis_levels,
+            "bits_per_axis": bits_per_axis,
+            "bits_per_symbol": bits_per_symbol,
+            "phi_ref": phi_ref,
+            "symbols": nsym,
+            "I_hat": I_hat, "Q_hat": Q_hat,
+            "I_dec": I_dec, "Q_dec": Q_dec,
+            "norm": norm,
+            "warnings": warnings
+        })
         return bits_out, meta
 
     if scheme == "16QAM":
