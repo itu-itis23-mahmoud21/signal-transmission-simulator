@@ -23,10 +23,10 @@ st.markdown(
         }
 
         section[data-testid="stMain"] > div[data-testid="stMainBlockContainer"]{
-            padding-top: 2.3rem !important;
+            padding-top: 2.4rem !important;
             padding-left: 3rem !important;
             padding-right: 3rem !important;
-            padding-bottom: 2.3rem !important;
+            padding-bottom: 2.4rem !important;
         }
     </style>
     """,
@@ -58,7 +58,7 @@ with col_logo:
             src="data:image/png;base64,{data}"
             alt="Istanbul Technical University"
             style="
-              height:80px; width:auto;
+              height:70px; width:auto;
               display:block;
               margin:0; padding:0;
               object-fit:contain;
