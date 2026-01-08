@@ -115,33 +115,40 @@ with col_ref:
 st.markdown(
     """
     <style>
-      .creator-link {
-        text-decoration: none;
-        color: inherit;
-        padding: 2px 6px;
-        border-radius: 8px;
-        transition: background-color 120ms ease, opacity 120ms ease;
-      }
-      .creator-link:hover {
-        background-color: rgba(128, 128, 128, 0.18);
-        opacity: 1.0;
-      }
-      .gh-icon {
-        display: inline-flex;
-        vertical-align: middle;
-        margin-right: 6px;
-        opacity: 0.85;
-      }
-      .gh-icon svg {
-        width: 16px;
-        height: 16px;
-        fill: currentColor;
-      }
+        .creator-link {
+          text-decoration: none;
+          color: inherit;
+          padding: 2px 6px;
+          border-radius: 8px;
+          transition: background-color 120ms ease, opacity 120ms ease;
+
+          display: inline-flex;        /* NEW */
+          align-items: center;         /* NEW: centers icon + text vertically */
+          gap: 6px;                    /* NEW: space between icon and name */
+        }
+
+        .creator-link:hover {
+          background-color: rgba(128, 128, 128, 0.18);
+          opacity: 1.0;
+        }
+
+        .gh-icon {
+          display: inline-flex;
+          opacity: 0.85;
+          transform: translateY(-1px); /* adjustable micro-shift; set to 0px if not needed */
+        }
+
+        .gh-icon svg {
+          width: 16px;
+          height: 16px;
+          fill: currentColor;
+          display: block;
+        }
     </style>
 
-    <div style="font-size:0.95rem; opacity:0.78; margin-bottom:0.5rem; margin-top:0.5rem;">
+    <div style="font-size:0.95rem; opacity:0.78; margin-bottom:0.5rem; margin-top:0.5rem; display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
       Created by:
-      <a class="creator-link" href="https://github.com/itu-itis23-mahmoud21" target="_blank"> <span class="gh-icon" aria-hidden="true">
+      <a class="creator-link" href="https://github.com/itu-itis23-mahmoud21" target="_blank"><span class="gh-icon" aria-hidden="true">
         <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
           <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
           0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52
@@ -152,10 +159,10 @@ st.markdown(
           1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>
         </svg>
       </span>Mohamed Ahmed Abdelsattar Mahmoud</a>
-      <span style="font-size:1.1rem;">
+      <span>
         &amp;
       </span>
-      <a class="creator-link" href="https://github.com/racha-badreddine" target="_blank"> <span class="gh-icon" aria-hidden="true">
+      <a class="creator-link" href="https://github.com/racha-badreddine" target="_blank"><span class="gh-icon" aria-hidden="true">
         <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
           <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
           0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52
