@@ -23,10 +23,10 @@ st.markdown(
         }
 
         section[data-testid="stMain"] > div[data-testid="stMainBlockContainer"]{
-            padding-top: 2.2rem !important;
+            padding-top: 2.3rem !important;
             padding-left: 3rem !important;
             padding-right: 3rem !important;
-            padding-bottom: 2.2rem !important;
+            padding-bottom: 2.3rem !important;
         }
     </style>
     """,
