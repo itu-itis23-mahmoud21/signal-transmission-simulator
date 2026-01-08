@@ -977,35 +977,41 @@ elif mode == "Digital → Analog":
             elif preset == "Offset (φ, φ+π)":
                 phi = st.slider(
                     "Reference phase φ (rad)",
-                    0.0,
-                    float(2 * np.pi),
+                    float(-np.pi),
+                    float(np.pi),
                     0.0,
                     step=0.01,
                 )
                 phase1 = float(phi)
-                phase0 = float((phi + np.pi) % (2 * np.pi))
+                phase0 = float(((phi + np.pi) + np.pi) % (2 * np.pi) - np.pi)
 
             else:  # Custom
                 phase1 = st.slider(
                     "Phase of binary 1, φ1 (rad)",
-                    0.0,
-                    float(2 * np.pi),
+                    float(-np.pi),
+                    float(np.pi),
                     0.0,
                     step=0.01,
                 )
                 phase0 = st.slider(
                     "Phase of binary 0, φ0 (rad)",
-                    0.0,
-                    float(2 * np.pi),
+                    float(-np.pi),
+                    float(np.pi),
                     float(np.pi),
                     step=0.01,
                 )
-
             kwargs["phase1"] = float(phase1)
             kwargs["phase0"] = float(phase0)
 
             # Derived values table (always shown)
             dphi = (float(phase0) - float(phase1) + np.pi) % (2 * np.pi) - np.pi
+
+            abs_sep = abs((float(phase0) - float(phase1) + np.pi) % (2*np.pi) - np.pi)
+
+            if abs_sep < 0.10:  # choose threshold (e.g., 0.10 rad ≈ 5.7°)
+                st.error("Invalid BPSK: φ0 and φ1 are too close → symbols become indistinguishable.")
+                invalid_params = True
+
             rows = [
                 {"Item": "Bit 1 phase φ1", "Value": f"{float(phase1):.3f} rad"},
                 {"Item": "Bit 0 phase φ0", "Value": f"{float(phase0):.3f} rad"},

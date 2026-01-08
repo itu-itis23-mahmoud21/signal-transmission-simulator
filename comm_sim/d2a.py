@@ -496,7 +496,7 @@ def demodulate(s_t: np.ndarray, scheme: str, params: SimParams, **kwargs) -> Tup
             I_hat.append(float(I_norm))
 
             # Decide by phase: compare to phase=0 (bit 1) vs phase=phase0 (bit 0)
-            phi = float(np.arctan2(Q, I))
+            phi = float(np.arctan2(-Q, I))  # correct phase for cos(ωt+φ) with this IQ convention
             d1 = _ang_dist(phi, phase1)
             d0 = _ang_dist(phi, phase0)
             bits_out.append(1 if d1 <= d0 else 0)
