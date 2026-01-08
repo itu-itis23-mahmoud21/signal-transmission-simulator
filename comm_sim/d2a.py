@@ -23,6 +23,16 @@ def _pad_bits(bits: List[int], k: int) -> Tuple[List[int], int]:
         return bits + [0] * pad, pad
     return bits, 0
 
+def _snap_to_cycles_per_bit(f: float, Tb: float) -> float:
+    """
+    Snap frequency to the nearest value that gives an integer number of cycles per bit:
+        f = k / Tb
+    """
+    if Tb <= 0:
+        return f
+    k = int(round(f * Tb))          # nearest integer cycles per bit
+    k = max(k, 1)                   # avoid zero/negative frequency
+    return k / Tb
 
 def _iq_correlator(seg: np.ndarray, tseg: np.ndarray, f: float) -> Tuple[float, float]:
     """
@@ -166,6 +176,25 @@ def modulate(bits: List[int], scheme: str, params: SimParams, **kwargs) -> Tuple
         if f1 < f0:
             f0, f1 = f1, f0
 
+        # Enforce integer cycles-per-bit (no phase reset), but keep tones distinct
+        f0_req, f1_req = f0, f1
+
+        k0 = int(round(f0 * Tb))
+        k1 = int(round(f1 * Tb))
+        k0 = max(k0, 1)
+        k1 = max(k1, 1)
+
+        # If snapping collapses the two tones, push the higher one up by 1 cycle/bit
+        if k0 == k1:
+            k1 = k0 + 1
+
+        f0 = k0 / Tb
+        f1 = k1 / Tb
+
+        # Re-check ordering after snapping
+        if f1 < f0:
+            f0, f1 = f1, f0
+
         warnings += _warn_params(params, extra_freqs=[f0, f1])
 
         s = np.zeros(N, dtype=float)
@@ -179,6 +208,8 @@ def modulate(bits: List[int], scheme: str, params: SimParams, **kwargs) -> Tuple
 
         meta.update({
             "tone_sep": tone_sep,
+            "f0_requested": f0_req,
+            "f1_requested": f1_req,
             "f0": f0,
             "f1": f1,
             "f_used": freqs,
@@ -388,6 +419,23 @@ def demodulate(s_t: np.ndarray, scheme: str, params: SimParams, **kwargs) -> Tup
         if f1 < f0:
             f0, f1 = f1, f0
 
+        # Must match TX: snap to integer cycles-per-bit, but keep tones distinct
+        f0_req, f1_req = f0, f1
+
+        k0 = int(round(f0 * Tb))
+        k1 = int(round(f1 * Tb))
+        k0 = max(k0, 1)
+        k1 = max(k1, 1)
+
+        if k0 == k1:
+            k1 = k0 + 1
+
+        f0 = k0 / Tb
+        f1 = k1 / Tb
+
+        if f1 < f0:
+            f0, f1 = f1, f0
+
         warnings += _warn_params(params, extra_freqs=[f0, f1])
 
         nbits = N // Ns
@@ -410,6 +458,8 @@ def demodulate(s_t: np.ndarray, scheme: str, params: SimParams, **kwargs) -> Tup
 
         meta.update({
             "tone_sep": tone_sep,
+            "f0_requested": f0_req,
+            "f1_requested": f1_req,
             "f0": f0,
             "f1": f1,
             "E0": E0_list,
