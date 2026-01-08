@@ -928,7 +928,6 @@ elif mode == "Digital → Analog":
             if np.isclose(kwargs["f0"], kwargs["f1"]):
                 st.error("Invalid BFSK: f0 and f1 cannot be equal.")
                 invalid_params = True
-        
 
         if scheme == "MFSK":
             nyq = float(params.fs) / 2.0
@@ -956,6 +955,57 @@ elif mode == "Digital → Analog":
 
             kwargs["L"] = int(L)
             kwargs["fd"] = float(fd)
+
+        if scheme == "BPSK":
+            preset = st.selectbox(
+                "BPSK configuration",
+                ["Standard (0, π)", "Offset (φ, φ+π)", "Custom (φ1, φ0)"],
+                index=0,
+            )
+
+            if preset == "Standard (0, π)":
+                phase1 = 0.0
+                phase0 = float(np.pi)
+
+            elif preset == "Offset (φ, φ+π)":
+                phi = st.slider(
+                    "Reference phase φ (rad)",
+                    0.0,
+                    float(2 * np.pi),
+                    0.0,
+                    step=0.01,
+                )
+                phase1 = float(phi)
+                phase0 = float((phi + np.pi) % (2 * np.pi))
+
+            else:  # Custom
+                phase1 = st.slider(
+                    "Phase of binary 1, φ1 (rad)",
+                    0.0,
+                    float(2 * np.pi),
+                    0.0,
+                    step=0.01,
+                )
+                phase0 = st.slider(
+                    "Phase of binary 0, φ0 (rad)",
+                    0.0,
+                    float(2 * np.pi),
+                    float(np.pi),
+                    step=0.01,
+                )
+
+            kwargs["phase1"] = float(phase1)
+            kwargs["phase0"] = float(phase0)
+
+            # Derived values table (always shown)
+            dphi = (float(phase0) - float(phase1) + np.pi) % (2 * np.pi) - np.pi
+            rows = [
+                {"Item": "Bit 1 phase φ1", "Value": f"{float(phase1):.3f} rad"},
+                {"Item": "Bit 0 phase φ0", "Value": f"{float(phase0):.3f} rad"},
+                {"Item": "Phase separation |Δφ| = |φ0−φ1|", "Value": f"{abs(float(dphi)):.3f} rad"},
+                {"Item": "Antipodal? (|Δφ| = π)", "Value": str(bool(np.isclose(abs(dphi), np.pi, atol=1e-2)))},
+            ]
+            render_events_table(rows, width=700)
 
         current_sig = make_signature(
             "d2a", params,
@@ -1063,6 +1113,11 @@ elif mode == "Digital → Analog":
                     for fk in ("f0", "f1"):
                         if fk in dem2 and isinstance(dem2[fk], (int, float, np.floating)):
                             dem2[fk] = f"{float(dem2[fk]):.2f}"
+
+                if dem2.get("scheme") == "BPSK":
+                    for pk in ("phase1", "phase0"):
+                        if pk in dem2 and isinstance(dem2[pk], (int, float, np.floating)):
+                            dem2[pk] = f"{float(dem2[pk]):.3f}"
                 
                 # 3) Keep your existing “simple vs event list” logic
                 simple = {}

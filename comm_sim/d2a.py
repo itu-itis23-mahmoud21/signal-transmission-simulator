@@ -244,16 +244,20 @@ def modulate(bits: List[int], scheme: str, params: SimParams, **kwargs) -> Tuple
     if scheme == "BPSK":
         warnings += _warn_params(params, extra_freqs=[])
 
+        # Phases (rad). Defaults implement textbook BPSK: bit1 at 0, bit0 at pi.
+        phase1 = float(kwargs.get("phase1", 0.0))
+        phase0 = float(kwargs.get("phase0", np.pi))
+
         s = np.zeros(N, dtype=float)
         phases: List[float] = []
         for i, b in enumerate(bits):
             a, z = i * Ns, (i + 1) * Ns
-            phase = 0.0 if b == 1 else np.pi
+            phase = phase1 if b == 1 else phase0
             phases.append(phase)
             seg_t = t[a:z]
             s[a:z] = Ac * np.cos(2 * np.pi * fc * seg_t + phase)
 
-        meta.update({"phase_used": phases, "warnings": warnings})
+        meta.update({"phase1": phase1, "phase0": phase0, "phase_used": phases, "warnings": warnings})
         return s, meta
 
     if scheme == "QPSK":
@@ -467,6 +471,15 @@ def demodulate(s_t: np.ndarray, scheme: str, params: SimParams, **kwargs) -> Tup
     if scheme == "BPSK":
         warnings += _warn_params(params, extra_freqs=[])
 
+        # Must match TX
+        phase1 = float(kwargs.get("phase1", 0.0))
+        phase0 = float(kwargs.get("phase0", np.pi))
+
+        def _ang_dist(a: float, b: float) -> float:
+            # shortest angular distance on circle
+            d = (a - b + np.pi) % (2 * np.pi) - np.pi
+            return abs(d)
+
         nbits = N // Ns
         bits_out: List[int] = []
         I_hat: List[float] = []
@@ -475,12 +488,20 @@ def demodulate(s_t: np.ndarray, scheme: str, params: SimParams, **kwargs) -> Tup
             a, z = i * Ns, (i + 1) * Ns
             seg = s_t[a:z]
             seg_t = t[a:z]
-            I, _Q = _iq_correlator(seg, seg_t, fc)
+
+            I, Q = _iq_correlator(seg, seg_t, fc)
+
+            # Normalize I for display/debug (kept from your original code)
             I_norm = I / (Ac if Ac != 0 else 1.0)
             I_hat.append(float(I_norm))
-            bits_out.append(1 if I_norm >= 0 else 0)
 
-        meta.update({"I_hat": I_hat, "warnings": warnings})
+            # Decide by phase: compare to phase=0 (bit 1) vs phase=phase0 (bit 0)
+            phi = float(np.arctan2(Q, I))
+            d1 = _ang_dist(phi, phase1)
+            d0 = _ang_dist(phi, phase0)
+            bits_out.append(1 if d1 <= d0 else 0)
+
+        meta.update({"phase1": phase1, "phase0": phase0, "I_hat": I_hat, "warnings": warnings})
         return bits_out, meta
 
     if scheme == "QPSK":
