@@ -1085,7 +1085,7 @@ elif mode == "Digital → Analog":
                     "Bits": e["Bits"],
                     "I level": f"{I:.0f}",
                     "Q level": f"{Q:.0f}",
-                    "Phase (rad)": f"{phase:.2f}",
+                    "Phase": f"{phase:.2f} rad",
                 })
 
             st.markdown(
@@ -1103,7 +1103,7 @@ elif mode == "Digital → Analog":
                     "Bits": st.column_config.TextColumn("Bits", width="small"),
                     "I level": st.column_config.TextColumn("I level", width="small"),
                     "Q level": st.column_config.TextColumn("Q level", width="small"),
-                    "Phase (rad)": st.column_config.TextColumn("Phase (rad)", width="small"),
+                    "Phase": st.column_config.TextColumn("Phase", width="small"),
                 },
             )
 

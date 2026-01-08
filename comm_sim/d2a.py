@@ -59,19 +59,20 @@ def _warn_params(params: SimParams, extra_freqs: List[float]) -> List[str]:
 # Mapping tables (exact inverse)
 # ----------------------------
 
-# QPSK Gray mapping (00,01,11,10)
+# QPSK mapping to match Stallings Eq (5.7) labeling:
+# 11 -> +π/4, 01 -> +3π/4, 00 -> -3π/4, 10 -> -π/4
 # bits -> (I, Q)
 _QPSK_MAP: Dict[Tuple[int, int], Tuple[float, float]] = {
-    (0, 0): (+1.0, +1.0),
+    (1, 1): (+1.0, +1.0),
     (0, 1): (-1.0, +1.0),
-    (1, 1): (-1.0, -1.0),
+    (0, 0): (-1.0, -1.0),
     (1, 0): (+1.0, -1.0),
 }
 # inverse: sign(I), sign(Q) -> bits
 _QPSK_INV: Dict[Tuple[int, int], Tuple[int, int]] = {
-    (+1, +1): (0, 0),
+    (+1, +1): (1, 1),
     (-1, +1): (0, 1),
-    (-1, -1): (1, 1),
+    (-1, -1): (0, 0),
     (+1, -1): (1, 0),
 }
 
