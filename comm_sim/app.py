@@ -828,7 +828,7 @@ if mode == "Digital → Digital":
 elif mode == "Digital → Analog":
     with st.sidebar:
         st.subheader("Technique")
-        label = st.selectbox("Modulation Technique", ["ASK", "BFSK", "MFSK", "BPSK", "QPSK", "16-QAM"])
+        label = st.selectbox("Modulation Technique", ["ASK", "BFSK", "MFSK", "BPSK", "DPSK", "QPSK", "16-QAM"])
         scheme = "16QAM" if label == "16-QAM" else label
 
         st.subheader("Technique parameters")
@@ -1029,6 +1029,34 @@ elif mode == "Digital → Analog":
                 },
             )
 
+        if scheme == "DPSK":
+            phase_init = st.slider(
+                "Reference phase (initial) φ_ref (rad)",
+                float(-np.pi),
+                float(np.pi),
+                0.0,
+                step=0.01,
+            )
+
+            kwargs["phase_init"] = float(phase_init)
+            kwargs["delta_phase"] = float(np.pi)  # fixed per textbook DPSK
+
+            rows = [
+                {"Item": "Reference phase φ_ref", "Value": f"{float(phase_init):.2f} rad"},
+                {"Item": "Bit-1 phase change Δφ", "Value": f"{float(np.pi):.2f} rad"},
+                {"Item": "Bit-0 phase change", "Value": "0.00 rad"},
+            ]
+            df = pd.DataFrame(rows)
+            st.dataframe(
+                df,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Item": st.column_config.TextColumn("Item", width="medium"),
+                    "Value": st.column_config.TextColumn("Value", width="small"),
+                },
+            )
+
         current_sig = make_signature(
             "d2a", params,
             bitstr=st.session_state["bitstr"].strip(),
@@ -1114,6 +1142,8 @@ elif mode == "Digital → Analog":
                 # Pull A_hat out so it doesn't appear as one huge list in the main table
                 a_hat = dem2.pop("A_hat", None)
                 i_hat = dem2.pop("I_hat", None)
+                phi_hat = dem2.pop("phi_hat", None)
+                delta_hat = dem2.pop("delta_hat", None)
                 warnings_list = dem2.pop("warnings", None)
                 tone_sep = dem2.pop("tone_sep", None)
                 dem2.pop("E0", None)
@@ -1139,6 +1169,11 @@ elif mode == "Digital → Analog":
 
                 if dem2.get("scheme") == "BPSK":
                     for pk in ("phase1", "phase0"):
+                        if pk in dem2 and isinstance(dem2[pk], (int, float, np.floating)):
+                            dem2[pk] = f"{float(dem2[pk]):.2f}"
+                    
+                if dem2.get("scheme") == "DPSK":
+                    for pk in ("phase_init", "delta_phase"):
                         if pk in dem2 and isinstance(dem2[pk], (int, float, np.floating)):
                             dem2[pk] = f"{float(dem2[pk]):.2f}"
                 
@@ -1173,6 +1208,16 @@ elif mode == "Digital → Analog":
                 if isinstance(i_hat, list):
                     with st.expander("I_hat (in-phase correlator per bit)", expanded=True):
                         rows = [{"bit_index": i, "I_hat": f"{float(v):.3f}"} for i, v in enumerate(i_hat)]
+                        render_events_table(rows, width=1000)
+
+                if isinstance(phi_hat, list):
+                    with st.expander("phi_hat (estimated absolute phase per bit)", expanded=False):
+                        rows = [{"bit_index": i, "phi_hat (rad)": f"{float(v):.3f}"} for i, v in enumerate(phi_hat)]
+                        render_events_table(rows, width=1000)
+
+                if isinstance(delta_hat, list):
+                    with st.expander("delta_hat (estimated phase change per bit)", expanded=False):
+                        rows = [{"bit_index": i, "delta_hat (rad)": f"{float(v):.3f}"} for i, v in enumerate(delta_hat)]
                         render_events_table(rows, width=1000)
 
                 if isinstance(warnings_list, list) and len(warnings_list) > 0:

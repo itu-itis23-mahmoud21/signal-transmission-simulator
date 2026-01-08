@@ -259,6 +259,38 @@ def modulate(bits: List[int], scheme: str, params: SimParams, **kwargs) -> Tuple
 
         meta.update({"phase1": phase1, "phase0": phase0, "phase_used": phases, "warnings": warnings})
         return s, meta
+    
+    if scheme == "DPSK":
+        warnings += _warn_params(params, extra_freqs=[])
+
+        # Reference/initial phase (rad): phase before first bit
+        phase_init = float(kwargs.get("phase_init", 0.0))
+        delta_phase = float(kwargs.get("delta_phase", np.pi))  # bit=1 flips by π (default)
+
+        s = np.zeros(N, dtype=float)
+
+        phases: List[float] = []
+        phase = phase_init
+        for i, b in enumerate(bits):
+            # Differential rule:
+            # b=0 -> same phase as previous
+            # b=1 -> opposite phase (add π)
+            if int(b) == 1:
+                phase = phase + delta_phase
+
+            phases.append(float(phase))
+
+            a, z = i * Ns, (i + 1) * Ns
+            seg_t = t[a:z]
+            s[a:z] = Ac * np.cos(2 * np.pi * fc * seg_t + phase)
+
+        meta.update({
+            "phase_init": phase_init,
+            "delta_phase": delta_phase,
+            "phase_used": phases,
+            "warnings": warnings
+        })
+        return s, meta
 
     if scheme == "QPSK":
         bits2, pad = _pad_bits(bits, 2)
@@ -502,6 +534,52 @@ def demodulate(s_t: np.ndarray, scheme: str, params: SimParams, **kwargs) -> Tup
             bits_out.append(1 if d1 <= d0 else 0)
 
         meta.update({"phase1": phase1, "phase0": phase0, "I_hat": I_hat, "warnings": warnings})
+        return bits_out, meta
+    
+    if scheme == "DPSK":
+        warnings += _warn_params(params, extra_freqs=[])
+
+        phase_init = float(kwargs.get("phase_init", 0.0))
+        delta_phase = float(kwargs.get("delta_phase", np.pi))
+
+        def _wrap_pm_pi(x: float) -> float:
+            return (x + np.pi) % (2 * np.pi) - np.pi
+
+        nbits = N // Ns
+        bits_out: List[int] = []
+        phi_hat: List[float] = []
+        delta_hat: List[float] = []
+
+        prev_phi = float(phase_init)
+
+        for i in range(nbits):
+            a, z = i * Ns, (i + 1) * Ns
+            seg = s_t[a:z]
+            seg_t = t[a:z]
+
+            I, Q = _iq_correlator(seg, seg_t, fc)
+
+            # Estimate absolute phase of current burst
+            phi = float(np.arctan2(-Q, I))  # consistent with your BPSK fix
+            phi_hat.append(phi)
+
+            # Differential phase change relative to previous burst
+            dphi = _wrap_pm_pi(phi - prev_phi)
+            delta_hat.append(dphi)
+
+            # Decide: closer to 0 => bit 0, closer to ±pi => bit 1
+            bit = 1 if abs(abs(dphi) - abs(delta_phase)) < abs(dphi) else 0
+            bits_out.append(bit)
+
+            prev_phi = phi
+
+        meta.update({
+            "phase_init": phase_init,
+            "delta_phase": delta_phase,
+            "phi_hat": phi_hat,
+            "delta_hat": delta_hat,
+            "warnings": warnings
+        })
         return bits_out, meta
 
     if scheme == "QPSK":
