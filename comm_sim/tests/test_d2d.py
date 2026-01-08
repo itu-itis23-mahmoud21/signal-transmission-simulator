@@ -532,7 +532,7 @@ def test_seeded_fuzz_b8zs_hdb3_extra(seed):
 
 
 # ==================================================
-# 10) Long-run stress (optional; enable via env var)
+# 10) Long-run stress
 # ==================================================
 
 @pytest.mark.parametrize("scheme", ["B8ZS", "HDB3"])
