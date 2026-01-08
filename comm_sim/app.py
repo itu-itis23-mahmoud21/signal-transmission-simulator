@@ -1356,6 +1356,20 @@ elif mode == "Digital → Analog":
                     if "phi_ref" in dem2 and isinstance(dem2["phi_ref"], (int, float, np.floating)):
                         dem2["phi_ref"] = f"{float(dem2['phi_ref']):.2f}"
 
+                if dem2.get("scheme") == "QAM":
+                    # show clean ints
+                    for ik in ("axis_levels", "bits_per_axis", "bits_per_symbol", "symbols"):
+                        if ik in dem2:
+                            try:
+                                dem2[ik] = int(dem2[ik])
+                            except Exception:
+                                pass
+                            
+                    # show clean floats
+                    for fk in ("phi_ref", "norm"):
+                        if fk in dem2 and isinstance(dem2[fk], (int, float, np.floating)):
+                            dem2[fk] = f"{float(dem2[fk]):.2f}"
+
                 # 3) Keep your existing “simple vs event list” logic
                 simple = {}
                 event_lists = {}
@@ -1398,7 +1412,7 @@ elif mode == "Digital → Analog":
                     with st.expander("I_dec (decided I levels per symbol)", expanded=False):
                         rows = [{"symbol_index": i, "I_dec": f"{float(v):.2f}"} for i, v in enumerate(i_dec)]
                         render_events_table(rows, width=1000)
-                
+
                 if isinstance(q_dec, list):
                     with st.expander("Q_dec (decided Q levels per symbol)", expanded=False):
                         rows = [{"symbol_index": i, "Q_dec": f"{float(v):.2f}"} for i, v in enumerate(q_dec)]
