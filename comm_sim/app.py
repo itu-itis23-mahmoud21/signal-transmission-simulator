@@ -1202,22 +1202,22 @@ elif mode == "Digital → Analog":
                 # 4) Show A_hat as a separate table (cleaner + controlled decimals)
                 if isinstance(a_hat, list):
                     with st.expander("A_hat (estimated amplitude per bit)", expanded=True):
-                        rows = [{"bit_index": i, "A_hat": f"{float(a):.3f}"} for i, a in enumerate(a_hat)]
+                        rows = [{"bit_index": i, "A_hat": f"{float(a):.2f}"} for i, a in enumerate(a_hat)]
                         render_events_table(rows, width=1000)
 
                 if isinstance(i_hat, list):
                     with st.expander("I_hat (in-phase correlator per bit)", expanded=True):
-                        rows = [{"bit_index": i, "I_hat": f"{float(v):.3f}"} for i, v in enumerate(i_hat)]
+                        rows = [{"bit_index": i, "I_hat": f"{float(v):.2f}"} for i, v in enumerate(i_hat)]
                         render_events_table(rows, width=1000)
 
                 if isinstance(phi_hat, list):
                     with st.expander("phi_hat (estimated absolute phase per bit)", expanded=False):
-                        rows = [{"bit_index": i, "phi_hat (rad)": f"{float(v):.3f}"} for i, v in enumerate(phi_hat)]
+                        rows = [{"bit_index": i, "phi_hat (rad)": f"{float(v):.2f}"} for i, v in enumerate(phi_hat)]
                         render_events_table(rows, width=1000)
 
                 if isinstance(delta_hat, list):
                     with st.expander("delta_hat (estimated phase change per bit)", expanded=False):
-                        rows = [{"bit_index": i, "delta_hat (rad)": f"{float(v):.3f}"} for i, v in enumerate(delta_hat)]
+                        rows = [{"bit_index": i, "delta_hat (rad)": f"{float(v):.2f}"} for i, v in enumerate(delta_hat)]
                         render_events_table(rows, width=1000)
 
                 if isinstance(warnings_list, list) and len(warnings_list) > 0:
