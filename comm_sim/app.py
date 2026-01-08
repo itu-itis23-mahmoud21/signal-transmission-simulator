@@ -1013,9 +1013,9 @@ elif mode == "Digital → Analog":
                 invalid_params = True
 
             rows = [
-                {"Item": "Bit 1 phase φ1", "Value": f"{float(phase1):.3f} rad"},
-                {"Item": "Bit 0 phase φ0", "Value": f"{float(phase0):.3f} rad"},
-                {"Item": "Phase separation |Δφ| = |φ0−φ1|", "Value": f"{abs(float(dphi)):.3f} rad"},
+                {"Item": "Bit 1 phase φ1", "Value": f"{float(phase1):.2f} rad"},
+                {"Item": "Bit 0 phase φ0", "Value": f"{float(phase0):.2f} rad"},
+                {"Item": "Phase separation |Δφ| = |φ0-φ1|", "Value": f"{abs(float(dphi)):.2f} rad"},
                 {"Item": "Antipodal? (|Δφ| = π)", "Value": str(bool(np.isclose(abs(dphi), np.pi, atol=1e-2)))},
             ]
             df = pd.DataFrame(rows)
@@ -1113,6 +1113,7 @@ elif mode == "Digital → Analog":
 
                 # Pull A_hat out so it doesn't appear as one huge list in the main table
                 a_hat = dem2.pop("A_hat", None)
+                i_hat = dem2.pop("I_hat", None)
                 warnings_list = dem2.pop("warnings", None)
                 tone_sep = dem2.pop("tone_sep", None)
                 dem2.pop("E0", None)
@@ -1139,7 +1140,7 @@ elif mode == "Digital → Analog":
                 if dem2.get("scheme") == "BPSK":
                     for pk in ("phase1", "phase0"):
                         if pk in dem2 and isinstance(dem2[pk], (int, float, np.floating)):
-                            dem2[pk] = f"{float(dem2[pk]):.3f}"
+                            dem2[pk] = f"{float(dem2[pk]):.2f}"
                 
                 # 3) Keep your existing “simple vs event list” logic
                 simple = {}
@@ -1168,7 +1169,12 @@ elif mode == "Digital → Analog":
                     with st.expander("A_hat (estimated amplitude per bit)", expanded=True):
                         rows = [{"bit_index": i, "A_hat": f"{float(a):.3f}"} for i, a in enumerate(a_hat)]
                         render_events_table(rows, width=1000)
-                
+
+                if isinstance(i_hat, list):
+                    with st.expander("I_hat (in-phase correlator per bit)", expanded=True):
+                        rows = [{"bit_index": i, "I_hat": f"{float(v):.3f}"} for i, v in enumerate(i_hat)]
+                        render_events_table(rows, width=1000)
+
                 if isinstance(warnings_list, list) and len(warnings_list) > 0:
                     with st.expander("Warnings", expanded=True):
                         wrows = [{"warning": w} for w in warnings_list]
