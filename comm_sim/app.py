@@ -1041,6 +1041,15 @@ elif mode == "Digital → Analog":
                 # Pull A_hat out so it doesn't appear as one huge list in the main table
                 a_hat = dem2.pop("A_hat", None)
                 warnings_list = dem2.pop("warnings", None)
+                tone_sep = dem2.pop("tone_sep", None)
+                dem2.pop("E0", None)
+                dem2.pop("E1", None)
+
+                # BFSK-specific formatting (no E0/E1 display)
+                if dem2.get("scheme") == "BFSK":
+                    for fk in ("f0_requested", "f1_requested", "f0", "f1"):
+                        if fk in dem2 and isinstance(dem2[fk], (int, float, np.floating)):
+                            dem2[fk] = f"{float(dem2[fk]):.2f}"
 
                 # 3) Keep your existing “simple vs event list” logic
                 simple = {}
@@ -1058,7 +1067,7 @@ elif mode == "Digital → Analog":
                     with st.expander("A_hat (estimated amplitude per bit)", expanded=True):
                         rows = [{"bit_index": i, "A_hat": f"{float(a):.3f}"} for i, a in enumerate(a_hat)]
                         render_events_table(rows, width=1000)
-
+                
                 if isinstance(warnings_list, list) and len(warnings_list) > 0:
                     with st.expander("Warnings", expanded=True):
                         wrows = [{"warning": w} for w in warnings_list]
