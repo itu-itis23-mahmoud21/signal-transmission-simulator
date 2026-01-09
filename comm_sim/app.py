@@ -1974,20 +1974,23 @@ elif mode == "Analog → Analog":
         )
         fc_ratio = st.slider("Carrier ratio fc/fm", 5, 50, 20, key="a2a_fc_ratio")
         fc_a = float(fc_ratio) * float(fm)
+        invalid_carrier = (fc_a >= 0.5 * fs_a)
+        if invalid_carrier:
+            st.error("Invalid settings: carrier fc must be < fs/2 to avoid aliasing. Increase fs or reduce fc/fm.")
         Ac_a = st.number_input("Carrier amplitude Ac", min_value=0.1, value=1.0, step=0.1, key="a2a_Ac")
 
         st.subheader("Modulation parameter")
-        ka = 0.5
+        na = 0.5
         kf = 5.0
         kp = 1.0
         if scheme == "AM":
-            ka = st.slider("ka (amplitude sensitivity)", 0.0, 2.0, 0.5, step=0.05, key="a2a_ka")
+            na = st.slider("n_a (modulation index)", 0.0, 1.5, 0.5, step=0.05, key="a2a_na")
         elif scheme == "FM":
             kf = st.slider("kf (Hz per unit amplitude)", 0.1, 50.0, 5.0, step=0.1, key="a2a_kf")
         else:
             kp = st.slider("kp (radians per unit amplitude)", 0.0, 10.0, 1.0, step=0.1, key="a2a_kp")
 
-        run = st.button("Run simulation", type="primary", key="a2a_run")
+        run = st.button("Run simulation", type="primary", key="a2a_run", disabled=invalid_carrier)
 
     # Build SimParams for A2A
     aparams = SimParams(fs=float(fs_a), Tb=1.0, samples_per_bit=20, Ac=float(Ac_a), fc=float(fc_a))
@@ -2001,7 +2004,7 @@ elif mode == "Analog → Analog":
         Am=float(Am),
         fm=float(fm),
         duration=float(duration),
-        ka=float(ka),
+        na=float(na),
         kf=float(kf),
         kp=float(kp),
     )
@@ -2023,7 +2026,7 @@ elif mode == "Analog → Analog":
                 Am=float(Am),
                 fm=float(fm),
                 duration=float(duration),
-                ka=float(ka),
+                na=float(na),
                 kf=float(kf),
                 kp=float(kp),
             )
@@ -2042,7 +2045,7 @@ elif mode == "Analog → Analog":
     # ---- Summary ----
     st.subheader("Summary")
     summ = res.meta.get("summary", {})
-    st.dataframe(dict_to_pretty_table(summ), hide_index=True, width="stretch")
+    dict_to_pretty_table(summ, width=700)
 
     # Shared X-axis formatting (align plots vertically like in A2D)
     tickvals = list(np.arange(0.0, float(duration) + 1e-9, 0.5))
@@ -2161,8 +2164,8 @@ elif mode == "Analog → Analog":
             if scheme == "AM":
                 am = res.meta.get("am", {})
                 rows += [
-                    {"Item": "ka", "Value": _fmt(am.get("ka", ka))},
-                    {"Item": "Modulation index μ = |ka|·max|m|/Ac", "Value": _fmt(am.get("modulation_index_mu", ""))},
+                    {"Item": "n_a", "Value": _fmt(am.get("na", na))},
+                    {"Item": "Modulation index μ (book) = |n_a| (since max|x|=1)", "Value": _fmt(am.get("modulation_index_mu", ""))},
                     {"Item": "Bandwidth hint (DSB-LC) ≈ 2·fm (Hz)", "Value": _fmt(am.get("bandwidth_hint_hz", ""))},
                 ]
             elif scheme == "FM":
@@ -2199,7 +2202,7 @@ elif mode == "Analog → Analog":
             {"Stage": "2) Carrier", "Description": "Generate carrier c(t)=cos(2π f_c t)."},
         ]
         if scheme == "AM":
-            steps.append({"Stage": "3) AM modulator", "Description": "s(t) = [A_c + k_a m(t)] · cos(2π f_c t) (DSB-LC AM)."})
+            steps.append({"Stage": "3) AM modulator", "Description": "Book (DSBTC): s(t) = A_c[1 + n_a x(t)]cos(2πf_ct), with x(t)=m(t)/max|m(t)|."})
             steps.append({"Stage": "4) (Ideal) AM demod", "Description": "Envelope estimate via analytic signal; m̂(t) ≈ (env−A_c)/k_a."})
         elif scheme == "FM":
             steps.append({"Stage": "3) FM modulator", "Description": "s(t)=A_c cos(2π f_c t + 2π k_f ∫ m(τ)dτ)."})

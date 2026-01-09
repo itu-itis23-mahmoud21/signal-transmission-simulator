@@ -76,14 +76,14 @@ def _moving_average(x: np.ndarray, win: int) -> np.ndarray:
 # -----------------------------
 # Book-aligned modulators (Ch.16.1 conventions)
 # -----------------------------
-def am_modulate(m_t: np.ndarray, t: np.ndarray, *, Ac: float, fc: float, ka: float) -> np.ndarray:
+def am_modulate(x_t: np.ndarray, t: np.ndarray, *, Ac: float, fc: float, na: float) -> np.ndarray:
     """
-    Conventional AM (DSB-LC):
-      s(t) = [Ac + ka * m(t)] cos(2π f_c t)
+    Book AM (DSBTC / DSB-LC) form:
+      s(t) = Ac * [1 + na * x(t)] * cos(2π f_c t)
 
-    Derived modulation index: μ = |ka| * max|m(t)| / Ac  (Ac>0)
+    where x(t) is normalized to unit amplitude (max|x| = 1).
     """
-    return (float(Ac) + float(ka) * m_t) * np.cos(2 * np.pi * float(fc) * t)
+    return float(Ac) * (1.0 + float(na) * x_t) * np.cos(2 * np.pi * float(fc) * t)
 
 
 def pm_modulate(m_t: np.ndarray, t: np.ndarray, *, Ac: float, fc: float, kp: float) -> np.ndarray:
@@ -114,7 +114,7 @@ def fm_modulate(
 # Simple "ideal" demodulators for visualization
 # -----------------------------
 def am_demodulate_envelope(
-    s_t: np.ndarray, *, Ac: float, ka: float, fs: float, fc: float
+    s_t: np.ndarray, *, Ac: float, na: float, m_peak: float, fs: float, fc: float
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Envelope detector (analytic-signal envelope).
@@ -130,12 +130,15 @@ def am_demodulate_envelope(
         env_est[0] = env_est[1]
         env_est[-1] = env_est[-2]
 
-    ka = float(ka)
-    if ka == 0.0:
+    na = float(na)
+    Ac = float(Ac)
+
+    if na == 0.0 or Ac == 0.0 or m_peak == 0.0:
         return np.zeros_like(s_t), env_est
 
-    # From s(t)=[Ac+ka*m(t)]cos(...), ideal envelope is Ac+ka*m(t)
-    m_hat = (env_est - float(Ac)) / ka
+    # Ideal envelope: Ac * (1 + na*x(t))
+    x_hat = (env_est / Ac - 1.0) / na
+    m_hat = x_hat * float(m_peak)   # de-normalize back to original message amplitude
     return m_hat, env_est
 
 
@@ -220,7 +223,7 @@ def simulate_a2a(
     Am: float,
     fm: float,
     duration: float,
-    ka: float = 0.5,
+    na: float = 0.5,
     kf: float = 5.0,
     kp: float = 1.0,
 ) -> SimResult:
@@ -273,24 +276,30 @@ def simulate_a2a(
     m_peak = float(np.max(np.abs(m))) if m.size else 0.0
 
     if scheme == "AM":
-        s = am_modulate(m, t, Ac=Ac, fc=fc, ka=ka) if N > 0 else np.array([], dtype=float)
-        m_hat, env_est = am_demodulate_envelope(s, Ac=Ac, ka=ka, fs=fs, fc=fc)
+        # Book convention: x(t) normalized to unit amplitude
+        x = (m / m_peak) if (m_peak > 0 and N > 0) else np.zeros_like(m)
 
-        mu = (abs(float(ka)) * m_peak / Ac) if Ac > 0 else float("inf")
+        s = am_modulate(x, t, Ac=Ac, fc=fc, na=na) if N > 0 else np.array([], dtype=float)
+        m_hat, env_est = am_demodulate_envelope(s, Ac=Ac, na=na, m_peak=m_peak, fs=fs, fc=fc)
+
+        # In book form, modulation index is exactly na (since max|x|=1)
+        mu = abs(float(na))
         meta["am"] = {
-            "ka": float(ka),
+            "na": float(na),
             "modulation_index_mu": float(mu),
             "overmodulated": bool(mu > 1.0),
-            "envelope_min_theory": float(Ac - abs(float(ka)) * m_peak),
-            "envelope_max_theory": float(Ac + abs(float(ka)) * m_peak),
-            "bandwidth_hint_hz": float(2.0 * fm),  # DSB-LC ≈ 2B, single-tone B≈fm
+            "envelope_min_theory": float(Ac * (1.0 - mu)),
+            "envelope_max_theory": float(Ac * (1.0 + mu)),
+            "bandwidth_hint_hz": float(2.0 * fm),  # DSBTC ≈ 2B, single-tone B≈fm
         }
+
+        env_theory = (float(Ac) * (1.0 + float(na) * x)) if N > 0 else np.array([], dtype=float)
 
         signals.update(
             {
                 "tx": s,
                 "envelope_est": env_est,
-                "envelope_theory": (Ac + float(ka) * m) if N > 0 else np.array([], dtype=float),
+                "envelope_theory": env_theory,
                 "recovered": m_hat,
             }
         )
@@ -342,7 +351,7 @@ def simulate_a2a(
     if scheme == "AM":
         summary.update(
             {
-                "ka": float(ka),
+                "na": float(na),
                 "mu": float(meta["am"]["modulation_index_mu"]),
                 "BW_hint_Hz": float(meta["am"]["bandwidth_hint_hz"]),
             }
