@@ -19,9 +19,31 @@ def _require_positive(name: str, value: float) -> float:
     return v
 
 
-def _analytic_amp_phase(x: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-    """Return instantaneous amplitude and unwrapped phase via analytic signal."""
-    analytic = hilbert(x)
+def _hilbert_reflect_center(x: np.ndarray, pad: int) -> np.ndarray:
+    """
+    Compute analytic signal using reflect-padding to reduce edge transients,
+    then return only the original (center) segment.
+    """
+    n = int(x.size)
+    if n == 0:
+        return hilbert(x)
+
+    pad = int(pad)
+    pad = max(0, min(pad, n - 1))  # keep valid
+    if pad == 0:
+        return hilbert(x)
+
+    xpad = np.pad(x, (pad, pad), mode="reflect")
+    apad = hilbert(xpad)
+    return apad[pad:-pad]
+
+
+def _analytic_amp_phase(x: np.ndarray, *, pad: int = 0) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Return instantaneous amplitude and unwrapped phase via analytic signal.
+    Uses optional reflect-padding to reduce boundary artifacts.
+    """
+    analytic = _hilbert_reflect_center(x, pad) if pad else hilbert(x)
     amp = np.abs(analytic)
     phase = np.unwrap(np.angle(analytic))
     return amp, phase
@@ -82,7 +104,8 @@ def am_demodulate_envelope(
     Envelope detector (analytic-signal envelope).
     Returns: (m_hat, envelope_est)
     """
-    env_est, _ = _analytic_amp_phase(s_t)
+    pad = max(8, int(round(0.01 * fs)))  # ~10 ms padding
+    env_est, _ = _analytic_amp_phase(s_t, pad=pad)
 
     # light smoothing helps the envelope look stable at high carrier frequencies
     win = max(1, int(round(fs / max(1.0, fc) * 0.25)))
@@ -106,7 +129,8 @@ def pm_demodulate_phase(
       m_hat(t) = φ_dev(t) / kp
     Returns: (m_hat, phase_dev)
     """
-    _, phase = _analytic_amp_phase(s_t)
+    pad = max(8, int(round(0.01 * fs)))
+    _, phase = _analytic_amp_phase(s_t, pad=pad)
     phase_dev = phase - 2 * np.pi * float(fc) * t
 
     # remove residual offset/drift
@@ -129,8 +153,14 @@ def fm_demodulate_instfreq(
       m_hat(t) = (f_i(t) - f_c) / kf
     Returns: (m_hat, inst_freq)
     """
-    _, phase = _analytic_amp_phase(s_t)
+    pad = max(8, int(round(0.01 * fs)))
+    _, phase = _analytic_amp_phase(s_t, pad=pad)
     inst_freq = np.gradient(phase) * float(fs) / (2 * np.pi)
+
+    # stabilize derivative at the edges
+    if inst_freq.size >= 2:
+        inst_freq[0] = inst_freq[1]
+        inst_freq[-1] = inst_freq[-2]
 
     # mild smoothing (derivative amplifies noise)
     win = max(1, int(round(fs / max(1.0, fc) * 0.10)))
