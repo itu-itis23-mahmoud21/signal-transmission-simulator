@@ -41,10 +41,19 @@
 #    - Unknown linecode scheme raises
 #    - duration=0 produces empty signals/bitstreams but remains consistent
 #
-# NOTE
-# ----
-# Long-run stress tests are intentionally NOT included yet (per assignment instructions).
-# A placeholder comment is kept at the end for adding them later.
+# 7) Long-run stress tests
+#    - Exercises “realistic worst-case” parameter combinations (high fm, high fs_mult,
+#      longer duration, larger Ns) to catch numerical issues, performance regressions,
+#      metadata shape mismatches, and any hidden state assumptions.
+#    - Runs both techniques:
+#        * PCM: tests across all line codes, both low and high n_bits regimes, and across
+#          all message waveforms (sine/square/triangle).
+#        * DM: tests across all line codes with both very small Δ (slope-overload-like
+#          behavior) and large Δ, plus an extra hard case (square wave + Manchester + odd Ns).
+#    - Verifies in each stress case:
+#        * Ideal-channel roundtrip remains lossless: decoded_bitstream == bitstream and match=True
+#        * Core arrays remain finite (no NaN/Inf) for m(t), linecode, recon_tx, recon_rx
+#        * Key size/shape relationships hold (bit_len·Ns == len(linecode), etc.)
 #
 # How to run
 # ----------
@@ -672,4 +681,238 @@ def test_seeded_fuzz_dm(seed):
 # ==========================================
 # 8) Long-run stress tests
 # ==========================================
-# TODO: Implement long-run stress tests for A2D (PCM + DM) later.
+
+def _assert_finite_core_signals(res):
+    # Core arrays that must never produce NaN/Inf in long runs
+    for k in ("m(t)", "linecode", "recon_tx", "recon_rx"):
+        arr = res.signals.get(k, None)
+        if arr is None:
+            continue
+        assert np.isfinite(arr).all(), f"{k} contains NaN/Inf in long-run test."
+
+
+# -----------------------
+# PCM long-run stress tests
+# -----------------------
+
+@pytest.mark.parametrize("linecode", LINECODES)
+@pytest.mark.parametrize("pattern", [
+    "max_rate_high_bits",     # large sample count + large bitstream
+    "max_rate_low_bits",      # large sample count + coarser quantization
+])
+def test_long_run_pcm_all_linecodes(linecode, pattern):
+    params = make_params(20)
+
+    # Keep display axis manageable but generate many PAM samples.
+    # fs_display is fixed in simulate_a2d; duration should not be too large.
+    Am = 4.0
+    fm = 50.0
+    fs_mult = 32
+    duration = 5.0
+
+    if pattern == "max_rate_high_bits":
+        n_bits = 6
+    elif pattern == "max_rate_low_bits":
+        n_bits = 2
+    else:
+        raise ValueError("Unknown pattern")
+
+    res = run(
+        "sine",
+        "PCM",
+        params,
+        Am=Am, fm=fm, duration=duration,
+        fs_mult=fs_mult, pcm_nbits=n_bits,
+        linecode_scheme=linecode,
+    )
+
+    assert_linecode_match(res, f"PCM long-run mismatch (linecode={linecode}, pattern={pattern})")
+    assert res.bits["decoded_bitstream"] == res.bits["bitstream"]
+
+    _assert_finite_core_signals(res)
+
+    # Size/shape sanity
+    num_samples = int(res.meta["sampler"]["num_samples"])
+    assert num_samples > 1000  # ensure it's actually "long-run"
+    assert len(res.bits["bitstream"]) == num_samples * n_bits
+
+    bit_len = int(res.meta["linecode"]["bit_len"])
+    Ns_eff = ns_used(res, params)
+    assert len(res.signals["linecode"]) == bit_len * Ns_eff
+    assert len(res.meta["t_bits"]) == len(res.signals["linecode"])
+
+    # Steps list should exist and be aligned (but don't iterate heavily)
+    pcm = res.meta.get("pcm", {})
+    assert isinstance(pcm.get("steps", None), list)
+    assert len(pcm["steps"]) == num_samples
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_long_run_pcm_all_waveforms_one_linecode(kind):
+    # Stress all waveforms, but avoid multiplying test count by all linecodes.
+    params = make_params(20)
+
+    Am = 4.0
+    fm = 50.0
+    fs_mult = 32
+    duration = 5.0
+    n_bits = 4
+    linecode = "NRZ-L"
+
+    res = run(
+        kind,
+        "PCM",
+        params,
+        Am=Am, fm=fm, duration=duration,
+        fs_mult=fs_mult, pcm_nbits=n_bits,
+        linecode_scheme=linecode,
+    )
+
+    assert_linecode_match(res, f"PCM long-run mismatch (kind={kind})")
+    assert res.bits["decoded_bitstream"] == res.bits["bitstream"]
+    _assert_finite_core_signals(res)
+
+    num_samples = int(res.meta["sampler"]["num_samples"])
+    assert num_samples > 1000
+    assert len(res.bits["bitstream"]) == num_samples * n_bits
+
+
+def test_long_run_pcm_large_samples_per_bit():
+    # One heavier waveform-length case: large Ns makes the linecode waveform much longer.
+    # Keep sample count moderate to avoid huge step dict lists.
+    params = make_params(60)
+
+    Am = 3.0
+    fm = 50.0
+    fs_mult = 32
+    duration = 3.0
+    n_bits = 6
+    linecode = "Bipolar-AMI"
+
+    res = run(
+        "sine",
+        "PCM",
+        params,
+        Am=Am, fm=fm, duration=duration,
+        fs_mult=fs_mult, pcm_nbits=n_bits,
+        linecode_scheme=linecode,
+    )
+
+    assert_linecode_match(res, "PCM long-run mismatch (large Ns)")
+    assert res.bits["decoded_bitstream"] == res.bits["bitstream"]
+    _assert_finite_core_signals(res)
+
+    bit_len = int(res.meta["linecode"]["bit_len"])
+    Ns_eff = ns_used(res, params)
+    assert len(res.signals["linecode"]) == bit_len * Ns_eff
+
+
+# -----------------------
+# DM long-run stress tests
+# -----------------------
+
+@pytest.mark.parametrize("linecode", LINECODES)
+@pytest.mark.parametrize("pattern", [
+    "slope_overload_like",    # very small delta (staircase can lag strongly)
+    "large_delta",            # larger delta (more aggressive tracking)
+])
+def test_long_run_dm_all_linecodes(linecode, pattern):
+    params = make_params(20)
+
+    Am = 4.0
+    fm = 50.0
+    fs_mult = 32
+    duration = 5.0
+
+    if pattern == "slope_overload_like":
+        delta = 0.02
+    elif pattern == "large_delta":
+        delta = 0.5
+    else:
+        raise ValueError("Unknown pattern")
+
+    res = run(
+        "sine",
+        "DM",
+        params,
+        Am=Am, fm=fm, duration=duration,
+        fs_mult=fs_mult, dm_delta=delta,
+        linecode_scheme=linecode,
+    )
+
+    assert_linecode_match(res, f"DM long-run mismatch (linecode={linecode}, pattern={pattern})")
+    assert res.bits["decoded_bitstream"] == res.bits["bitstream"]
+    _assert_finite_core_signals(res)
+
+    num_samples = int(res.meta["sampler"]["num_samples"])
+    assert num_samples > 1000
+    assert len(res.bits["bitstream"]) == num_samples  # DM: 1 bit per sample
+
+    bit_len = int(res.meta["linecode"]["bit_len"])
+    Ns_eff = ns_used(res, params)
+    assert len(res.signals["linecode"]) == bit_len * Ns_eff
+
+    # Staircase plot arrays should include initial estimate point
+    stair_tx = np.asarray(res.meta["stair_tx"]["x"], dtype=float)
+    stair_rx = np.asarray(res.meta["stair_rx"]["x"], dtype=float)
+    assert len(stair_tx) >= num_samples  # should be num_samples+1 in the book-style build
+    assert len(stair_rx) >= num_samples
+
+
+def test_long_run_dm_square_wave_hard_case():
+    # Square wave has sharp transitions; DM staircase may struggle but should remain stable and match bits.
+    params = make_params(21)  # odd Ns + Manchester stress path
+    Am = 3.0
+    fm = 40.0
+    fs_mult = 32
+    duration = 4.0
+    delta = 0.05
+    linecode = "Manchester"
+
+    res = run(
+        "square",
+        "DM",
+        params,
+        Am=Am, fm=fm, duration=duration,
+        fs_mult=fs_mult, dm_delta=delta,
+        linecode_scheme=linecode,
+    )
+
+    assert_linecode_match(res, "DM long-run mismatch (square/Manchester/odd Ns)")
+    assert res.bits["decoded_bitstream"] == res.bits["bitstream"]
+    _assert_finite_core_signals(res)
+
+    # Manchester must have even effective Ns
+    assert ns_used(res, params) % 2 == 0
+
+
+# -----------------------
+# Manchester odd-Ns long-run (both techniques)
+# -----------------------
+
+@pytest.mark.parametrize("technique", ["PCM", "DM"])
+def test_long_run_manchester_odd_Ns_both_techniques(technique):
+    params = make_params(21)  # forces even-adjustment internally
+    Am = 2.0
+    fm = 50.0
+    fs_mult = 32
+    duration = 4.0
+
+    kwargs = dict(
+        Am=Am, fm=fm, duration=duration,
+        fs_mult=fs_mult,
+        linecode_scheme="Manchester",
+    )
+    if technique == "PCM":
+        kwargs["pcm_nbits"] = 6
+    else:
+        kwargs["dm_delta"] = 0.1
+
+    res = run("sine", technique, params, **kwargs)
+
+    assert_linecode_match(res, f"{technique} long-run mismatch (Manchester odd Ns)")
+    assert res.bits["decoded_bitstream"] == res.bits["bitstream"]
+    _assert_finite_core_signals(res)
+
+    assert ns_used(res, params) == 22
+
