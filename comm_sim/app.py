@@ -1661,11 +1661,15 @@ elif mode == "Analog → Digital":
         tab1, tab3, tab4 = st.tabs(["Waveforms", "Steps", "Details"])
 
         with tab1:
+            x_dt = 0.5
+            tickvals = np.arange(0, duration + 1e-9, x_dt)
+            common_margin = dict(l=60, r=20, t=90, b=50)
             # 1) analog message
-            st.plotly_chart(
-                plot_signal(res.t, res.signals["m(t)"], "Message m(t)", grid=show_grid),
-                width="stretch",
-            )
+            figm = plot_signal(res.t, res.signals["m(t)"], "Message m(t)", grid=show_grid)
+            figm.update_xaxes(range=[0, duration], autorange=False)
+            figm.update_xaxes(tickmode="array", tickvals=tickvals)
+            figm.update_layout(margin=common_margin, showlegend=False)
+            st.plotly_chart(figm, width="stretch")
 
             # 2) message + PAM samples
             t_s = res.meta["sampled"]["t_s"]
@@ -1675,9 +1679,22 @@ elif mode == "Analog → Digital":
             fig.add_trace(go.Scatter(x=res.t, y=res.signals["m(t)"], mode="lines", name="m(t)"))
             fig.add_trace(go.Scatter(x=t_s, y=m_s, mode="markers", name="PAM samples"))
             fig.update_layout(title="PAM sampling (message with sampled points)", xaxis_title="Time (s)", yaxis_title="Amplitude")
+            fig.update_layout(
+                legend=dict(
+                    orientation="h",
+                    x=1.0, y=1.13,
+                    xanchor="right", yanchor="bottom",
+                    xref="paper", yref="paper",
+                    bgcolor="rgba(0,0,0,0)",
+                ),
+                margin=common_margin,
+            )
+            fig.update_xaxes(domain=[0, 1])
             if show_grid:
                 fig.update_xaxes(showgrid=True)
                 fig.update_yaxes(showgrid=True)
+            fig.update_xaxes(range=[0, duration], autorange=False)
+            fig.update_xaxes(tickmode="array", tickvals=tickvals)
             st.plotly_chart(fig, width="stretch")
 
             # 3) Staircase (TX) + (RX)
@@ -1691,20 +1708,35 @@ elif mode == "Analog → Digital":
                     fig2.add_trace(go.Scatter(x=stair_rx["t_s"], y=stair_rx["x"], mode="lines", line_shape="hv", name="RX staircase"))
                 title = "PCM Quantized Staircase (TX vs RX)" if technique == "PCM" else "Delta Modulation Staircase (TX vs RX)"
                 fig2.update_layout(title=title, xaxis_title="Time (s)", yaxis_title="Amplitude")
+                fig2.update_layout(
+                    legend=dict(
+                        orientation="h",
+                        x=1.0, y=1.13,
+                        xanchor="right", yanchor="bottom",
+                        xref="paper", yref="paper",
+                        bgcolor="rgba(0,0,0,0)",
+                    ),
+                    margin=common_margin,
+                )
+                fig2.update_xaxes(domain=[0, 1])
                 if show_grid:
                     fig2.update_xaxes(showgrid=True)
                     fig2.update_yaxes(showgrid=True)
+                fig2.update_xaxes(range=[0, duration], autorange=False)
+                fig2.update_xaxes(tickmode="array", tickvals=tickvals)
                 st.plotly_chart(fig2, width="stretch")
 
             # 4) Reconstructed signal on dense axis (ZOH)
-            st.plotly_chart(
-                plot_signal(res.t, res.signals["recon_tx"], "Reconstructed (TX, ZOH on display axis)", grid=show_grid),
-                width="stretch",
-            )
-            st.plotly_chart(
-                plot_signal(res.t, res.signals["recon_rx"], "Reconstructed (RX, after line-decode + codec decode)", grid=show_grid),
-                width="stretch",
-            )
+            figrtx = plot_signal(res.t, res.signals["recon_tx"], "Reconstructed (TX, ZOH on display axis)", grid=show_grid)
+            figrtx.update_xaxes(range=[0, duration], autorange=False)
+            figrtx.update_xaxes(tickmode="array", tickvals=tickvals)
+            figrtx.update_layout(margin=common_margin, showlegend=False)
+            st.plotly_chart(figrtx, width="stretch")
+            figrrx = plot_signal(res.t, res.signals["recon_rx"], "Reconstructed (RX, after line-decode + codec decode)", grid=show_grid)
+            figrrx.update_xaxes(range=[0, duration], autorange=False)
+            figrrx.update_xaxes(tickmode="array", tickvals=tickvals)
+            figrrx.update_layout(margin=common_margin, showlegend=False)
+            st.plotly_chart(figrrx, width="stretch")
 
             # 5) Line-coded waveform
             t_bits = res.meta["t_bits"]
