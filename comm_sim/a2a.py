@@ -72,6 +72,40 @@ def _moving_average(x: np.ndarray, win: int) -> np.ndarray:
     y = np.convolve(xpad, k, mode="valid")  # length == len(x) for odd win
     return y
 
+def _ideal_lowpass_fft(x: np.ndarray, fs: float, cutoff_hz: float, *, pad: int = 0) -> np.ndarray:
+    """
+    Ideal (brick-wall) low-pass using FFT, with optional reflect padding then crop.
+    This is "perfect" for our noiseless simulation (up to floating-point error).
+    """
+    x = np.asarray(x, dtype=float)
+    n = int(x.size)
+    if n == 0:
+        return x
+
+    fs = float(fs)
+    cutoff_hz = float(cutoff_hz)
+
+    pad = int(max(0, pad))
+    pad = min(pad, n - 1) if n > 1 else 0
+
+    if pad > 0:
+        xpad = np.pad(x, (pad, pad), mode="reflect")
+    else:
+        xpad = x
+
+    N = int(xpad.size)
+    X = np.fft.rfft(xpad)
+    freqs = np.fft.rfftfreq(N, d=1.0 / fs)
+
+    # brick-wall mask
+    X[freqs > cutoff_hz] = 0.0
+
+    ypad = np.fft.irfft(X, n=N)
+
+    if pad > 0:
+        return ypad[pad:-pad]
+    return ypad
+
 
 # -----------------------------
 # Book-aligned modulators (Ch.16.1 conventions)
@@ -114,42 +148,55 @@ def fm_modulate(
 # Simple "ideal" demodulators for visualization
 # -----------------------------
 def am_demodulate_envelope(
-    s_t: np.ndarray, *, Ac: float, na: float, m_peak: float, fs: float, fc: float
+    s_t: np.ndarray, *, t: np.ndarray, Ac: float, na: float, m_peak: float, fs: float, fc: float
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Envelope detector (analytic-signal envelope).
-    Returns: (m_hat, envelope_est)
+    "Perfect-case" coherent AM demod (synchronous detection + ideal LPF).
+
+    For s(t) = Ac*(1+na*x(t))*sin(2πf_ct):
+      mix:   y(t) = s(t) * sin(2πf_ct) = Ac*(1+na*x(t))*sin^2(...) 
+           = Ac/2*(1+na*x(t)) - Ac/2*(1+na*x(t))*cos(4πf_ct)
+      LPF removes the 2fc term -> Ac/2*(1+na*x(t))
+
+    Returns:
+      m_hat: recovered message
+      env_est: estimated envelope Ac*(1+na*x(t)) (theory-consistent)
     """
-    pad = max(8, int(round(0.01 * fs)))  # ~10 ms padding
-    env_est, _ = _analytic_amp_phase(s_t, pad=pad)
-
-    win = max(1, int(round(fs / max(1.0, fc) * 1.0)))
-    env_est = _moving_average(env_est, win)
-
-    # stabilize edges (Hilbert envelope has boundary transients, worse for square)
-    if env_est.size >= 2:
-        env_est[0] = env_est[1]
-        env_est[-1] = env_est[-2]
-
-    # NEW: clamp a small guard region at both ends to kill residual spikes
-    if env_est.size >= 10:
-        guard = max(2, int(round(0.01 * fs)))      # ~10 ms
-        guard = min(guard, env_est.size // 4)      # keep reasonable
-        env_est[:guard] = env_est[guard]
-        env_est[-guard:] = env_est[-guard - 1]
+    s_t = np.asarray(s_t, dtype=float)
+    t = np.asarray(t, dtype=float)
 
     na = float(na)
     Ac = float(Ac)
+    fs = float(fs)
+    fc = float(fc)
+
+    if s_t.size == 0:
+        return s_t.copy(), s_t.copy()
 
     if na == 0.0 or Ac == 0.0 or m_peak == 0.0:
-        return np.zeros_like(s_t), env_est
+        return np.zeros_like(s_t), Ac * np.ones_like(s_t)
 
-    # Ideal envelope: Ac * (1 + na*x(t))
-    x_hat = (env_est / Ac - 1.0) / na
-    m_hat = x_hat * float(m_peak)   # de-normalize back to original message amplitude
-    if m_hat.size >= 10:
-        m_hat[:guard] = m_hat[guard]
-        m_hat[-guard:] = m_hat[-guard - 1]
+    # Synchronous mixing with the *known carrier* used in modulation
+    lo = np.sin(2.0 * np.pi * fc * t)
+    y = s_t * lo
+
+    # Choose a cutoff that keeps baseband but rejects the 2fc term.
+    # The unwanted term is centered at 2fc. A safe cutoff is < fc.
+    cutoff = min(0.90 * fc, 0.45 * fs)
+
+    # Reflect-pad by a few carrier cycles to suppress FFT edge artifacts
+    pad = max(8, int(round(3.0 * fs / max(1.0, fc))))
+
+    y_lp = _ideal_lowpass_fft(y, fs, cutoff, pad=pad)
+
+    # Base term should be Ac/2*(1+na*x(t))
+    base = (2.0 / Ac) * y_lp  # ≈ (1 + na*x(t))
+
+    # Envelope estimate (book form)
+    env_est = Ac * base
+
+    x_hat = (base - 1.0) / na
+    m_hat = x_hat * float(m_peak)
     return m_hat, env_est
 
 
@@ -247,6 +294,9 @@ def simulate_a2a(
       3) "Ideal" demodulate for visualization (envelope / phase / inst. freq)
     """
     scheme = str(scheme).upper()
+    kind = str(kind).lower()
+    if kind == "square":
+        raise ValueError("Square waveform is not supported in Analog → Analog mode (Ch.16.1 uses bandlimited analog messages).")
     if scheme not in ("AM", "FM", "PM"):
         raise ValueError("scheme must be AM, FM, or PM")
 
@@ -271,6 +321,11 @@ def simulate_a2a(
     m = gen_message(t, kind, Am, fm) if N > 0 else np.array([], dtype=float)
     carrier = np.sin(2 * np.pi * fc * t) if N > 0 else np.array([], dtype=float)
 
+    signals: Dict[str, np.ndarray] = {}
+
+    signals["m(t)"] = m
+    signals["carrier"] = carrier
+
     meta: Dict[str, Any] = {
         "scheme": scheme,
         "kind": kind,
@@ -282,8 +337,6 @@ def simulate_a2a(
         "fs": float(fs),
     }
 
-    signals: Dict[str, np.ndarray] = {"m(t)": m, "carrier": carrier}
-
     m_peak = float(np.max(np.abs(m))) if m.size else 0.0
 
     if scheme == "AM":
@@ -291,7 +344,7 @@ def simulate_a2a(
         x = (m / m_peak) if (m_peak > 0 and N > 0) else np.zeros_like(m)
 
         s = am_modulate(x, t, Ac=Ac, fc=fc, na=na) if N > 0 else np.array([], dtype=float)
-        m_hat, env_est = am_demodulate_envelope(s, Ac=Ac, na=na, m_peak=m_peak, fs=fs, fc=fc)
+        m_hat, env_est = am_demodulate_envelope(s, t=t, Ac=Ac, na=na, m_peak=m_peak, fs=fs, fc=fc)
 
         # In book form, modulation index is exactly na (since max|x|=1)
         mu = abs(float(na))
