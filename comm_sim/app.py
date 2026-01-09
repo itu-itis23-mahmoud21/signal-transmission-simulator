@@ -1611,7 +1611,14 @@ elif mode == "Digital → Analog":
 elif mode == "Analog → Digital":
     with st.sidebar:
         st.subheader("Technique")
-        technique = st.selectbox("Digitization Technique", ["PCM", "DM"])
+        technique_label = st.selectbox(
+            "Digitization Technique",
+            ["PCM (Pulse Code Modulation)", "DM (Delta Modulation)"],
+            key="a2d_technique_label",
+        )
+
+        technique = "PCM" if technique_label.startswith("PCM") else "DM"
+
 
         st.subheader("Message signal")
         kind = st.selectbox("Waveform", ["sine", "square", "triangle"])
