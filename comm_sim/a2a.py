@@ -143,61 +143,41 @@ def fm_modulate(
     phase = 2 * np.pi * float(fc) * t + 2 * np.pi * float(kf) * integral
     return float(Ac) * np.sin(phase)
 
-
-# -----------------------------
-# Simple "ideal" demodulators for visualization
-# -----------------------------
 def am_demodulate_envelope(
     s_t: np.ndarray, *, t: np.ndarray, Ac: float, na: float, m_peak: float, fs: float, fc: float
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
-    "Perfect-case" coherent AM demod (synchronous detection + ideal LPF).
+    Book-aligned AM envelope detection (DSBTC / DSB-LC).
 
-    For s(t) = Ac*(1+na*x(t))*sin(2πf_ct):
-      mix:   y(t) = s(t) * sin(2πf_ct) = Ac*(1+na*x(t))*sin^2(...) 
-           = Ac/2*(1+na*x(t)) - Ac/2*(1+na*x(t))*cos(4πf_ct)
-      LPF removes the 2fc term -> Ac/2*(1+na*x(t))
+    For s(t) = Ac * [1 + na*x(t)] * sin(2π f_c t),
+    the envelope is env(t) = Ac * [1 + na*x(t)]  (assuming na < 1 so it never crosses 0).
 
-    Returns:
-      m_hat: recovered message
-      env_est: estimated envelope Ac*(1+na*x(t)) (theory-consistent)
+    Recover:
+      x_hat(t) = (env/Ac - 1) / na
+      m_hat(t) = x_hat * m_peak
     """
     s_t = np.asarray(s_t, dtype=float)
-    t = np.asarray(t, dtype=float)
+
+    if s_t.size == 0:
+        return s_t.copy(), s_t.copy()
 
     na = float(na)
     Ac = float(Ac)
     fs = float(fs)
     fc = float(fc)
 
-    if s_t.size == 0:
-        return s_t.copy(), s_t.copy()
-
     if na == 0.0 or Ac == 0.0 or m_peak == 0.0:
         return np.zeros_like(s_t), Ac * np.ones_like(s_t)
 
-    # Synchronous mixing with the *known carrier* used in modulation
-    lo = np.sin(2.0 * np.pi * fc * t)
-    y = s_t * lo
-
-    # Choose a cutoff that keeps baseband but rejects the 2fc term.
-    # The unwanted term is centered at 2fc. A safe cutoff is < fc.
-    cutoff = min(0.90 * fc, 0.45 * fs)
-
-    # Reflect-pad by a few carrier cycles to suppress FFT edge artifacts
+    # Envelope detector via analytic signal amplitude (Hilbert), with reflect-padding for clean edges
     pad = max(8, int(round(3.0 * fs / max(1.0, fc))))
+    env, _ = _analytic_amp_phase(s_t, pad=pad)  # env = |hilbert(s)|
 
-    y_lp = _ideal_lowpass_fft(y, fs, cutoff, pad=pad)
-
-    # Base term should be Ac/2*(1+na*x(t))
-    base = (2.0 / Ac) * y_lp  # ≈ (1 + na*x(t))
-
-    # Envelope estimate (book form)
-    env_est = Ac * base
-
+    base = env / Ac                 # ≈ 1 + na*x(t)
     x_hat = (base - 1.0) / na
     m_hat = x_hat * float(m_peak)
-    return m_hat, env_est
+
+    return m_hat, env
 
 
 def pm_demodulate_phase(
@@ -313,16 +293,31 @@ def simulate_a2a(
     if fm <= 0:
         raise ValueError("fm must be > 0")
 
-    # time axis
+    # time axis (pad for AM to avoid Hilbert edge artifacts in the displayed window)
     N = int(round(duration * fs))
-    t = make_time_axis(N, fs) if N > 0 else np.array([], dtype=float)
+    padN = max(8, int(round(3.0 * fs / max(1.0, fc)))) if (scheme == "AM" and N > 0) else 0
+    N_full = N + 2 * padN
 
-    # message
-    m = gen_message(t, kind, Am, fm) if N > 0 else np.array([], dtype=float)
-    carrier = np.sin(2 * np.pi * fc * t) if N > 0 else np.array([], dtype=float)
+    if N_full > 0:
+        # center the requested window at t∈[0, duration) by shifting the padded axis
+        t_full = (np.arange(N_full, dtype=float) - padN) / fs
+    else:
+        t_full = np.array([], dtype=float)
+
+    # full message / carrier (used for AM modulation+demod), then crop to the requested window
+    m_full = gen_message(t_full, kind, Am, fm) if N_full > 0 else np.array([], dtype=float)
+    carrier_full = np.sin(2 * np.pi * fc * t_full) if N_full > 0 else np.array([], dtype=float)
+
+    if N > 0:
+        t = t_full[padN:padN + N]
+        m = m_full[padN:padN + N]
+        carrier = carrier_full[padN:padN + N]
+    else:
+        t = np.array([], dtype=float)
+        m = np.array([], dtype=float)
+        carrier = np.array([], dtype=float)
 
     signals: Dict[str, np.ndarray] = {}
-
     signals["m(t)"] = m
     signals["carrier"] = carrier
 
@@ -337,14 +332,24 @@ def simulate_a2a(
         "fs": float(fs),
     }
 
-    m_peak = float(np.max(np.abs(m))) if m.size else 0.0
+    m_peak = float(np.max(np.abs(m_full))) if m_full.size else 0.0
 
     if scheme == "AM":
         # Book convention: x(t) normalized to unit amplitude
-        x = (m / m_peak) if (m_peak > 0 and N > 0) else np.zeros_like(m)
+        x_full = (m_full / m_peak) if (m_peak > 0 and N_full > 0) else np.zeros_like(m_full)
+        x = (m / m_peak) if (m_peak > 0 and N > 0) else np.zeros_like(m)  # for theory plot in-window
 
-        s = am_modulate(x, t, Ac=Ac, fc=fc, na=na) if N > 0 else np.array([], dtype=float)
-        m_hat, env_est = am_demodulate_envelope(s, t=t, Ac=Ac, na=na, m_peak=m_peak, fs=fs, fc=fc)
+        s_full = am_modulate(x_full, t_full, Ac=Ac, fc=fc, na=na) if N_full > 0 else np.array([], dtype=float)
+        m_hat_full, env_est_full = am_demodulate_envelope(s_full, t=t_full, Ac=Ac, na=na, m_peak=m_peak, fs=fs, fc=fc)
+
+        if N > 0:
+            s = s_full[padN:padN + N]
+            m_hat = m_hat_full[padN:padN + N]
+            env_est = env_est_full[padN:padN + N]
+        else:
+            s = np.array([], dtype=float)
+            m_hat = np.array([], dtype=float)
+            env_est = np.array([], dtype=float)
 
         # In book form, modulation index is exactly na (since max|x|=1)
         mu = abs(float(na))
