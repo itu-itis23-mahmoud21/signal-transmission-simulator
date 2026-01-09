@@ -1,50 +1,154 @@
 from __future__ import annotations
 
 from typing import Any, Dict, Tuple
+
 import numpy as np
 from scipy.signal import hilbert
+
 from utils import SimParams, SimResult, make_time_axis
 from a2d import gen_message
 
-def am_modulate(m_t: np.ndarray, t: np.ndarray, Ac: float, fc: float, ka: float) -> np.ndarray:
-    return (Ac + ka * m_t) * np.cos(2*np.pi*fc*t)
+
+# -----------------------------
+# Helpers
+# -----------------------------
+def _require_positive(name: str, value: float) -> float:
+    v = float(value)
+    if v <= 0:
+        raise ValueError(f"{name} must be > 0")
+    return v
 
 
-def fm_modulate(m_t: np.ndarray, t: np.ndarray, Ac: float, fc: float, kf: float, fs: float) -> np.ndarray:
-    # phase = 2π fc t + 2π kf ∫ m(t) dt
-    integral = np.cumsum(m_t) / fs
-    phase = 2*np.pi*fc*t + 2*np.pi*kf*integral
-    return Ac * np.cos(phase)
-
-
-def pm_modulate(m_t: np.ndarray, t: np.ndarray, Ac: float, fc: float, kp: float) -> np.ndarray:
-    phase = 2*np.pi*fc*t + kp * m_t
-    return Ac * np.cos(phase)
-
-
-def am_demodulate(s_t: np.ndarray) -> np.ndarray:
-    analytic = hilbert(s_t)
-    env = np.abs(analytic)
-    # remove DC (carrier amplitude component)
-    return env - np.mean(env)
-
-
-def fm_demodulate(s_t: np.ndarray, fc: float, fs: float) -> np.ndarray:
-    analytic = hilbert(s_t)
+def _analytic_amp_phase(x: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """Return instantaneous amplitude and unwrapped phase via analytic signal."""
+    analytic = hilbert(x)
+    amp = np.abs(analytic)
     phase = np.unwrap(np.angle(analytic))
-    # instantaneous frequency: (1/2π) d/dt phase
-    inst_freq = np.gradient(phase) * fs / (2*np.pi)
-    # remove carrier and center
-    return inst_freq - fc
+    return amp, phase
 
 
-def pm_demodulate(s_t: np.ndarray, fc: float, t: np.ndarray) -> np.ndarray:
-    analytic = hilbert(s_t)
-    phase = np.unwrap(np.angle(analytic))
-    carrier_phase = 2*np.pi*fc*t
-    return phase - carrier_phase
+def _moving_average(x: np.ndarray, win: int) -> np.ndarray:
+    if win <= 1:
+        return x
+    win = int(win)
+    k = np.ones(win, dtype=float) / float(win)
+    return np.convolve(x, k, mode="same")
 
 
+# -----------------------------
+# Book-aligned modulators (Ch.16.1 conventions)
+# -----------------------------
+def am_modulate(m_t: np.ndarray, t: np.ndarray, *, Ac: float, fc: float, ka: float) -> np.ndarray:
+    """
+    Conventional AM (DSB-LC):
+      s(t) = [Ac + ka * m(t)] cos(2π f_c t)
+
+    Derived modulation index: μ = |ka| * max|m(t)| / Ac  (Ac>0)
+    """
+    return (float(Ac) + float(ka) * m_t) * np.cos(2 * np.pi * float(fc) * t)
+
+
+def pm_modulate(m_t: np.ndarray, t: np.ndarray, *, Ac: float, fc: float, kp: float) -> np.ndarray:
+    """
+    Phase modulation (PM):
+      s(t) = Ac cos(2π f_c t + kp * m(t))
+    """
+    return float(Ac) * np.cos(2 * np.pi * float(fc) * t + float(kp) * m_t)
+
+
+def fm_modulate(
+    m_t: np.ndarray, t: np.ndarray, *, Ac: float, fc: float, kf: float, fs: float
+) -> np.ndarray:
+    """
+    Frequency modulation (FM):
+      s(t) = Ac cos( 2π f_c t + 2π kf ∫ m(τ) dτ )
+
+    Here kf is a frequency sensitivity in (Hz per unit amplitude).
+    Instantaneous frequency: f_i(t) = f_c + kf*m(t)
+    """
+    fs = float(fs)
+    integral = np.cumsum(m_t) / fs  # ∫ m(t) dt (rectangular integration)
+    phase = 2 * np.pi * float(fc) * t + 2 * np.pi * float(kf) * integral
+    return float(Ac) * np.cos(phase)
+
+
+# -----------------------------
+# Simple "ideal" demodulators for visualization
+# -----------------------------
+def am_demodulate_envelope(
+    s_t: np.ndarray, *, Ac: float, ka: float, fs: float, fc: float
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Envelope detector (analytic-signal envelope).
+    Returns: (m_hat, envelope_est)
+    """
+    env_est, _ = _analytic_amp_phase(s_t)
+
+    # light smoothing helps the envelope look stable at high carrier frequencies
+    win = max(1, int(round(fs / max(1.0, fc) * 0.25)))
+    env_est = _moving_average(env_est, win)
+
+    ka = float(ka)
+    if ka == 0.0:
+        return np.zeros_like(s_t), env_est
+
+    # From s(t)=[Ac+ka*m(t)]cos(...), ideal envelope is Ac+ka*m(t)
+    m_hat = (env_est - float(Ac)) / ka
+    return m_hat, env_est
+
+
+def pm_demodulate_phase(
+    s_t: np.ndarray, *, t: np.ndarray, fc: float, kp: float, fs: float
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Coherent PM demod via analytic phase:
+      φ_dev(t) ≈ unwrap(angle(hilbert(s))) - 2π f_c t
+      m_hat(t) = φ_dev(t) / kp
+    Returns: (m_hat, phase_dev)
+    """
+    _, phase = _analytic_amp_phase(s_t)
+    phase_dev = phase - 2 * np.pi * float(fc) * t
+
+    # remove residual offset/drift
+    phase_dev = phase_dev - np.mean(phase_dev)
+
+    kp = float(kp)
+    if kp == 0.0:
+        return np.zeros_like(s_t), phase_dev
+
+    m_hat = phase_dev / kp
+    return m_hat, phase_dev
+
+
+def fm_demodulate_instfreq(
+    s_t: np.ndarray, *, fc: float, kf: float, fs: float
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    FM demod via instantaneous frequency:
+      f_i(t) = (1/2π) d/dt phase(t)
+      m_hat(t) = (f_i(t) - f_c) / kf
+    Returns: (m_hat, inst_freq)
+    """
+    _, phase = _analytic_amp_phase(s_t)
+    inst_freq = np.gradient(phase) * float(fs) / (2 * np.pi)
+
+    # mild smoothing (derivative amplifies noise)
+    win = max(1, int(round(fs / max(1.0, fc) * 0.10)))
+    inst_freq = _moving_average(inst_freq, win)
+
+    kf = float(kf)
+    if kf == 0.0:
+        return np.zeros_like(s_t), inst_freq
+
+    f_dev = inst_freq - float(fc)
+    f_dev = f_dev - np.mean(f_dev)
+    m_hat = f_dev / kf
+    return m_hat, inst_freq
+
+
+# -----------------------------
+# Simulation entry point
+# -----------------------------
 def simulate_a2a(
     kind: str,
     scheme: str,
@@ -57,39 +161,147 @@ def simulate_a2a(
     kf: float = 5.0,
     kp: float = 1.0,
 ) -> SimResult:
-    fs = float(params.fs)
-    fc = float(params.fc)
-    Ac = float(params.Ac)
+    """
+    Analog → Analog modulation simulation (Ch.16.1 conventions).
 
-    N = int(duration * fs)
-    t = make_time_axis(N, fs)
-    m = gen_message(t, kind, Am, fm)
-
-    meta: Dict[str, Any] = {"scheme": scheme, "kind": kind, "Am": Am, "fm": fm, "Ac": Ac, "fc": fc, "fs": fs}
-
-    if scheme == "AM":
-        s = am_modulate(m, t, Ac, fc, ka=ka)
-        m_hat = am_demodulate(s)
-        meta["ka"] = ka
-
-    elif scheme == "FM":
-        s = fm_modulate(m, t, Ac, fc, kf=kf, fs=fs)
-        m_hat = fm_demodulate(s, fc=fc, fs=fs)
-        meta["kf"] = kf
-
-    elif scheme == "PM":
-        s = pm_modulate(m, t, Ac, fc, kp=kp)
-        m_hat = pm_demodulate(s, fc=fc, t=t)
-        # remove DC offset
-        m_hat = m_hat - np.mean(m_hat)
-        meta["kp"] = kp
-
-    else:
+    Pipeline:
+      1) Generate analog message m(t)
+      2) Modulate (AM / FM / PM) to get s(t)
+      3) "Ideal" demodulate for visualization (envelope / phase / inst. freq)
+    """
+    scheme = str(scheme).upper()
+    if scheme not in ("AM", "FM", "PM"):
         raise ValueError("scheme must be AM, FM, or PM")
 
-    return SimResult(
-        t=t,
-        signals={"m(t)": m, "tx": s, "recovered": m_hat},
-        bits={},
-        meta=meta
-    )
+    fs = _require_positive("params.fs", float(params.fs))
+    fc = _require_positive("params.fc", float(params.fc))
+    Ac = _require_positive("params.Ac", float(params.Ac))
+
+    Am = float(Am)
+    fm = float(fm)
+    duration = float(duration)
+
+    if duration < 0:
+        raise ValueError("duration must be >= 0")
+    if fm <= 0:
+        raise ValueError("fm must be > 0")
+
+    # time axis
+    N = int(round(duration * fs))
+    t = make_time_axis(N, fs) if N > 0 else np.array([], dtype=float)
+
+    # message
+    m = gen_message(t, kind, Am, fm) if N > 0 else np.array([], dtype=float)
+    carrier = np.cos(2 * np.pi * fc * t) if N > 0 else np.array([], dtype=float)
+
+    meta: Dict[str, Any] = {
+        "scheme": scheme,
+        "kind": kind,
+        "Am": float(Am),
+        "fm": float(fm),
+        "duration": float(duration),
+        "Ac": float(Ac),
+        "fc": float(fc),
+        "fs": float(fs),
+    }
+
+    signals: Dict[str, np.ndarray] = {"m(t)": m, "carrier": carrier}
+
+    m_peak = float(np.max(np.abs(m))) if m.size else 0.0
+
+    if scheme == "AM":
+        s = am_modulate(m, t, Ac=Ac, fc=fc, ka=ka) if N > 0 else np.array([], dtype=float)
+        m_hat, env_est = am_demodulate_envelope(s, Ac=Ac, ka=ka, fs=fs, fc=fc)
+
+        mu = (abs(float(ka)) * m_peak / Ac) if Ac > 0 else float("inf")
+        meta["am"] = {
+            "ka": float(ka),
+            "modulation_index_mu": float(mu),
+            "overmodulated": bool(mu > 1.0),
+            "envelope_min_theory": float(Ac - abs(float(ka)) * m_peak),
+            "envelope_max_theory": float(Ac + abs(float(ka)) * m_peak),
+            "bandwidth_hint_hz": float(2.0 * fm),  # DSB-LC ≈ 2B, single-tone B≈fm
+        }
+
+        signals.update(
+            {
+                "tx": s,
+                "envelope_est": env_est,
+                "envelope_theory": (Ac + float(ka) * m) if N > 0 else np.array([], dtype=float),
+                "recovered": m_hat,
+            }
+        )
+
+    elif scheme == "FM":
+        s = fm_modulate(m, t, Ac=Ac, fc=fc, kf=kf, fs=fs) if N > 0 else np.array([], dtype=float)
+        m_hat, inst_freq = fm_demodulate_instfreq(s, fc=fc, kf=kf, fs=fs)
+
+        delta_f = abs(float(kf)) * m_peak
+        beta = (delta_f / fm) if fm > 0 else float("inf")
+        bw_carson = 2.0 * (delta_f + fm)
+
+        meta["fm"] = {
+            "kf_hz_per_unit": float(kf),
+            "delta_f_max_hz": float(delta_f),
+            "beta_index": float(beta),
+            "bw_carson_hz": float(bw_carson),
+        }
+
+        signals.update({"tx": s, "inst_freq": inst_freq, "recovered": m_hat})
+
+    else:  # PM
+        s = pm_modulate(m, t, Ac=Ac, fc=fc, kp=kp) if N > 0 else np.array([], dtype=float)
+        m_hat, phase_dev = pm_demodulate_phase(s, t=t, fc=fc, kp=kp, fs=fs)
+
+        delta_phi = abs(float(kp)) * m_peak  # radians
+        delta_f = abs(float(kp)) * m_peak * fm  # Hz (sine approx)
+        bw_carson = 2.0 * (delta_f + fm)
+
+        meta["pm"] = {
+            "kp_rad_per_unit": float(kp),
+            "delta_phi_max_rad": float(delta_phi),
+            "delta_f_max_hz_sine_approx": float(delta_f),
+            "bw_carson_hz_sine_approx": float(bw_carson),
+        }
+
+        signals.update({"tx": s, "phase_dev": phase_dev, "recovered": m_hat})
+
+    # Small UI-friendly summary
+    summary: Dict[str, Any] = {
+        "scheme": scheme,
+        "fs": float(fs),
+        "fc": float(fc),
+        "Ac": float(Ac),
+        "fm": float(fm),
+        "Am": float(Am),
+        "duration": float(duration),
+    }
+    if scheme == "AM":
+        summary.update(
+            {
+                "ka": float(ka),
+                "mu": float(meta["am"]["modulation_index_mu"]),
+                "BW_hint_Hz": float(meta["am"]["bandwidth_hint_hz"]),
+            }
+        )
+    elif scheme == "FM":
+        summary.update(
+            {
+                "kf": float(kf),
+                "Δf_max_Hz": float(meta["fm"]["delta_f_max_hz"]),
+                "β": float(meta["fm"]["beta_index"]),
+                "BW_Carson_Hz": float(meta["fm"]["bw_carson_hz"]),
+            }
+        )
+    else:
+        summary.update(
+            {
+                "kp": float(kp),
+                "Δφ_max_rad": float(meta["pm"]["delta_phi_max_rad"]),
+                "Δf_max_Hz": float(meta["pm"]["delta_f_max_hz_sine_approx"]),
+                "BW_Carson_Hz": float(meta["pm"]["bw_carson_hz_sine_approx"]),
+            }
+        )
+    meta["summary"] = summary
+
+    return SimResult(t=t, signals=signals, bits={}, meta=meta)

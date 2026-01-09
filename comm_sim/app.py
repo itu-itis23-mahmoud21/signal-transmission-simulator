@@ -1952,67 +1952,275 @@ elif mode == "Analog → Digital":
 elif mode == "Analog → Analog":
     with st.sidebar:
         st.subheader("Technique")
-        scheme = st.selectbox("Modulation", ["AM", "FM", "PM"])
+        scheme_label = st.selectbox(
+            "Modulation",
+            ["AM (Amplitude Modulation)", "FM (Frequency Modulation)", "PM (Phase Modulation)"],
+            key="a2a_scheme_label",
+        )
+        scheme = scheme_label.split()[0]  # "AM" / "FM" / "PM"
 
         st.subheader("Message signal")
-        kind = st.selectbox("Waveform", ["sine", "square", "triangle"])
-        Am = st.slider("Amplitude Am", 0.1, 5.0, 1.0, step=0.1)
-        fm = st.slider("Message frequency fm (Hz)", 1.0, 50.0, 5.0, step=1.0)
-        duration = st.slider("Duration (s)", 0.5, 5.0, 2.0, step=0.5)
+        kind = st.selectbox("Waveform", ["sine", "square", "triangle"], key="a2a_kind")
+        Am = st.slider("Amplitude Am", 0.1, 5.0, 1.0, step=0.1, key="a2a_Am")
+        fm = st.slider("Message frequency fm (Hz)", 1.0, 50.0, 5.0, step=1.0, key="a2a_fm")
+        duration = st.slider("Duration (s)", 0.5, 5.0, 2.0, step=0.5, key="a2a_duration")
 
         st.subheader("Carrier/sampling")
-        fs_a = st.select_slider("Sampling rate fs (Hz)", options=[2000, 5000, 10000, 20000], value=10000)
-        fc_ratio = st.slider("Carrier ratio fc/fm", 5, 50, 20)
-        fc_a = fc_ratio * fm
-        Ac_a = st.number_input("Carrier amplitude Ac", min_value=0.1, value=1.0, step=0.1)
+        fs_a = st.select_slider(
+            "Sampling rate fs (Hz)",
+            options=[2000, 5000, 10000, 20000],
+            value=10000,
+            key="a2a_fs",
+        )
+        fc_ratio = st.slider("Carrier ratio fc/fm", 5, 50, 20, key="a2a_fc_ratio")
+        fc_a = float(fc_ratio) * float(fm)
+        Ac_a = st.number_input("Carrier amplitude Ac", min_value=0.1, value=1.0, step=0.1, key="a2a_Ac")
 
         st.subheader("Modulation parameter")
         ka = 0.5
         kf = 5.0
         kp = 1.0
         if scheme == "AM":
-            ka = st.slider("ka", 0.0, 2.0, 0.5, step=0.05)
+            ka = st.slider("ka (amplitude sensitivity)", 0.0, 2.0, 0.5, step=0.05, key="a2a_ka")
         elif scheme == "FM":
-            kf = st.slider("kf", 0.1, 20.0, 5.0, step=0.5)
+            kf = st.slider("kf (Hz per unit amplitude)", 0.1, 50.0, 5.0, step=0.1, key="a2a_kf")
         else:
-            kp = st.slider("kp", 0.1, 10.0, 1.0, step=0.1)
+            kp = st.slider("kp (radians per unit amplitude)", 0.0, 10.0, 1.0, step=0.1, key="a2a_kp")
 
-        run = st.button("Run simulation", type="primary")
+        run = st.button("Run simulation", type="primary", key="a2a_run")
 
-    # Keep last result
+    # Build SimParams for A2A
+    aparams = SimParams(fs=float(fs_a), Tb=1.0, samples_per_bit=20, Ac=float(Ac_a), fc=float(fc_a))
+
+    # Signature-based run control (no auto-run on first entry, live-update after first run)
+    current_sig = make_signature(
+        "a2a",
+        aparams,
+        scheme=str(scheme),
+        kind=str(kind),
+        Am=float(Am),
+        fm=float(fm),
+        duration=float(duration),
+        ka=float(ka),
+        kf=float(kf),
+        kp=float(kp),
+    )
+
     if "a2a_last" not in st.session_state:
         st.session_state["a2a_last"] = None
+    if "a2a_sig" not in st.session_state:
+        st.session_state["a2a_sig"] = None
 
-    # Run only on click, then store
-    if run:
-        aparams = SimParams(
-            fs=float(fs_a),
-            Tb=params.Tb,
-            samples_per_bit=params.samples_per_bit,
-            Ac=float(Ac_a),
-            fc=float(fc_a),
-        )
-        res = simulate_a2a(kind, scheme, aparams, Am=Am, fm=fm, duration=duration, ka=ka, kf=kf, kp=kp)
+    prev_sig = st.session_state.get("a2a_sig", None)
+    should_run = bool(run) or ((prev_sig is not None) and (prev_sig != current_sig))
+
+    if should_run:
+        try:
+            res = simulate_a2a(
+                kind,
+                scheme,
+                aparams,
+                Am=float(Am),
+                fm=float(fm),
+                duration=float(duration),
+                ka=float(ka),
+                kf=float(kf),
+                kp=float(kp),
+            )
+        except Exception as e:
+            st.error(f"Simulation error: {e}")
+            st.stop()
+
         st.session_state["a2a_last"] = res
+        st.session_state["a2a_sig"] = current_sig
 
-    # Always display either empty state or last result
     res = st.session_state.get("a2a_last", None)
     if res is None:
-        empty_state()
-    else:
-        tab1, tab3, tab4 = st.tabs(["Waveforms", "Steps", "Details"])
+        st.info("Set parameters, then click **Run simulation**.")
+        st.stop()
 
-        with tab1:
-            st.plotly_chart(plot_signal(res.t, res.signals["m(t)"], "Message m(t)", grid=show_grid), width="stretch")
-            st.plotly_chart(
-                plot_signal(res.t, res.signals["tx"], f"Modulated signal ({scheme})", grid=show_grid, x_dtick=params.Tb, y_dtick=1),
-                width="stretch",
+    # ---- Summary ----
+    st.subheader("Summary")
+    summ = res.meta.get("summary", {})
+    st.dataframe(dict_to_pretty_table(summ), hide_index=True, width="stretch")
+
+    # Shared X-axis formatting (align plots vertically like in A2D)
+    tickvals = list(np.arange(0.0, float(duration) + 1e-9, 0.5))
+    if (len(tickvals) == 0) or (abs(tickvals[-1] - float(duration)) > 1e-9):
+        tickvals.append(float(duration))
+
+    common_margin = dict(t=90, r=20, l=20, b=40)
+    legend_above = dict(
+        orientation="h",
+        x=1.0,
+        y=1.13,
+        xanchor="right",
+        yanchor="bottom",
+        xref="paper",
+        yref="paper",
+        bgcolor="rgba(0,0,0,0)",
+        itemsizing="constant",
+        itemwidth=70,
+    )
+
+    tab1, tab2, tab3 = st.tabs(["Waveforms", "Steps", "Details"])
+
+    with tab1:
+        # 1) Message
+        figm = go.Figure()
+        figm.add_trace(go.Scatter(x=res.t, y=res.signals["m(t)"], mode="lines", name="m(t)"))
+        figm.update_layout(title="Message m(t)", xaxis_title="Time (s)", yaxis_title="Amplitude", showlegend=False, margin=common_margin)
+        figm.update_xaxes(range=[0, duration], autorange=False, tickmode="array", tickvals=tickvals)
+        figm.update_xaxes(domain=[0, 1])
+        if show_grid:
+            figm.update_xaxes(showgrid=True)
+            figm.update_yaxes(showgrid=True)
+        st.plotly_chart(figm, width="stretch")
+
+        # 2) Modulated signal (and envelope for AM)
+        figtx = go.Figure()
+        figtx.add_trace(go.Scatter(x=res.t, y=res.signals["tx"], mode="lines", name="s(t) (TX)"))
+
+        if scheme == "AM" and ("envelope_theory" in res.signals):
+            env = res.signals["envelope_theory"]
+            figtx.add_trace(go.Scatter(x=res.t, y=env, mode="lines", name="+Envelope (theory)", line=dict(dash="dash"), opacity=0.85))
+            figtx.add_trace(go.Scatter(x=res.t, y=-env, mode="lines", name="-Envelope (theory)", line=dict(dash="dash"), opacity=0.85))
+
+        figtx.update_layout(
+            title=f"Modulated signal s(t) ({scheme})",
+            xaxis_title="Time (s)",
+            yaxis_title="Amplitude",
+            legend=legend_above,
+            margin=common_margin,
+        )
+        figtx.update_xaxes(range=[0, duration], autorange=False, tickmode="array", tickvals=tickvals)
+        figtx.update_xaxes(domain=[0, 1])
+        if show_grid:
+            figtx.update_xaxes(showgrid=True)
+            figtx.update_yaxes(showgrid=True)
+        st.plotly_chart(figtx, width="stretch")
+
+        # 3) Recovered vs original (overlay)
+        figr = go.Figure()
+        figr.add_trace(go.Scatter(x=res.t, y=res.signals["m(t)"], mode="lines", name="m(t) (original)", opacity=0.55))
+        figr.add_trace(
+            go.Scatter(
+                x=res.t,
+                y=res.signals["recovered"],
+                mode="lines",
+                name="Recovered (RX)",
+                line=dict(color="#ff4b4b", width=2),
             )
-            st.plotly_chart(plot_signal(res.t, res.signals["recovered"], "Recovered message", grid=show_grid), width="stretch")
+        )
+        figr.update_layout(
+            title="Recovered message (overlay)",
+            xaxis_title="Time (s)",
+            yaxis_title="Amplitude",
+            legend=legend_above,
+            margin=common_margin,
+        )
+        figr.update_xaxes(range=[0, duration], autorange=False, tickmode="array", tickvals=tickvals)
+        figr.update_xaxes(domain=[0, 1])
+        if show_grid:
+            figr.update_xaxes(showgrid=True)
+            figr.update_yaxes(showgrid=True)
+        st.plotly_chart(figr, width="stretch")
 
-        with tab3:
-            st.json(res.meta)
+    with tab2:
+        # Formatting helpers for compact, readable tables
+        def _fmt(x: float, nd: int = 3) -> str:
+            try:
+                xf = float(x)
+            except Exception:
+                return str(x)
+            if abs(xf) >= 1000:
+                return f"{xf:.0f}"
+            if abs(xf) >= 100:
+                return f"{xf:.1f}"
+            if abs(xf) >= 10:
+                return f"{xf:.2f}"
+            return f"{xf:.{nd}f}".rstrip("0").rstrip(".")
 
-        with tab4:
-            st.write("Parameters:")
-            st.json(res.meta)
+        # Scheme warnings: AM overmodulation when μ>1
+        if scheme == "AM":
+            mu = float(res.meta.get("am", {}).get("modulation_index_mu", 0.0))
+            if mu > 1.0:
+                st.warning(f"AM overmodulation detected (μ={mu:.2f} > 1). Envelope will cross zero and envelope detection distorts.")
+
+        # Parameters (expandable)
+        with st.expander("A2A parameters and derived values", expanded=True):
+            rows = [
+                {"Item": "Scheme", "Value": scheme},
+                {"Item": "Message waveform", "Value": str(kind)},
+                {"Item": "Am (message amplitude)", "Value": _fmt(Am)},
+                {"Item": "fm (Hz)", "Value": _fmt(fm)},
+                {"Item": "Duration (s)", "Value": _fmt(duration)},
+                {"Item": "fs (Hz)", "Value": _fmt(fs_a)},
+                {"Item": "fc (Hz)", "Value": _fmt(fc_a)},
+                {"Item": "Ac (carrier amplitude)", "Value": _fmt(Ac_a)},
+            ]
+
+            if scheme == "AM":
+                am = res.meta.get("am", {})
+                rows += [
+                    {"Item": "ka", "Value": _fmt(am.get("ka", ka))},
+                    {"Item": "Modulation index μ = |ka|·max|m|/Ac", "Value": _fmt(am.get("modulation_index_mu", ""))},
+                    {"Item": "Bandwidth hint (DSB-LC) ≈ 2·fm (Hz)", "Value": _fmt(am.get("bandwidth_hint_hz", ""))},
+                ]
+            elif scheme == "FM":
+                fm_meta = res.meta.get("fm", {})
+                rows += [
+                    {"Item": "kf (Hz per unit)", "Value": _fmt(fm_meta.get("kf_hz_per_unit", kf))},
+                    {"Item": "Max freq deviation Δf (Hz)", "Value": _fmt(fm_meta.get("delta_f_max_hz", ""))},
+                    {"Item": "FM index β = Δf/fm", "Value": _fmt(fm_meta.get("beta_index", ""))},
+                    {"Item": "Carson BW ≈ 2(Δf + fm) (Hz)", "Value": _fmt(fm_meta.get("bw_carson_hz", ""))},
+                ]
+            else:
+                pm = res.meta.get("pm", {})
+                rows += [
+                    {"Item": "kp (rad per unit)", "Value": _fmt(pm.get("kp_rad_per_unit", kp))},
+                    {"Item": "Max phase dev Δφ (rad)", "Value": _fmt(pm.get("delta_phi_max_rad", ""))},
+                    {"Item": "Max freq dev Δf (Hz, sine approx)", "Value": _fmt(pm.get("delta_f_max_hz_sine_approx", ""))},
+                    {"Item": "Carson BW ≈ 2(Δf + fm) (Hz)", "Value": _fmt(pm.get("bw_carson_hz_sine_approx", ""))},
+                ]
+
+            dfp = pd.DataFrame(rows)
+            st.dataframe(
+                dfp,
+                hide_index=True,
+                width="stretch",
+                column_config={
+                    "Item": st.column_config.TextColumn("Item", width="medium"),
+                    "Value": st.column_config.TextColumn("Value", width="medium"),
+                },
+            )
+
+        # Steps table
+        steps = [
+            {"Stage": "1) Message", "Description": "Generate analog message m(t) from chosen waveform (sine/square/triangle)."},
+            {"Stage": "2) Carrier", "Description": "Generate carrier c(t)=cos(2π f_c t)."},
+        ]
+        if scheme == "AM":
+            steps.append({"Stage": "3) AM modulator", "Description": "s(t) = [A_c + k_a m(t)] · cos(2π f_c t) (DSB-LC AM)."})
+            steps.append({"Stage": "4) (Ideal) AM demod", "Description": "Envelope estimate via analytic signal; m̂(t) ≈ (env−A_c)/k_a."})
+        elif scheme == "FM":
+            steps.append({"Stage": "3) FM modulator", "Description": "s(t)=A_c cos(2π f_c t + 2π k_f ∫ m(τ)dτ)."})
+            steps.append({"Stage": "4) (Ideal) FM demod", "Description": "Instantaneous frequency from phase derivative; m̂(t) ≈ (f_i(t)−f_c)/k_f."})
+        else:
+            steps.append({"Stage": "3) PM modulator", "Description": "s(t)=A_c cos(2π f_c t + k_p m(t))."})
+            steps.append({"Stage": "4) (Ideal) PM demod", "Description": "Phase deviation from analytic phase; m̂(t) ≈ (φ(t)−2πf_ct)/k_p."})
+
+        dfs = pd.DataFrame(steps)
+        st.dataframe(
+            dfs,
+            hide_index=True,
+            width="stretch",
+            column_config={
+                "Stage": st.column_config.TextColumn("Stage", width="medium"),
+                "Description": st.column_config.TextColumn("Description", width="large"),
+            },
+        )
+
+    with tab3:
+        st.write("Full metadata (for debugging):")
+        st.json(res.meta)
