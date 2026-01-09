@@ -227,6 +227,43 @@ def test_meta_has_expected_top_fields(technique):
     assert "bitstream" in res.bits
     assert "decoded_bitstream" in res.bits
 
+@pytest.mark.parametrize("technique", TECHNIQUES)
+@pytest.mark.parametrize("kind", KINDS)
+@pytest.mark.parametrize("fs_mult", [2, 8, 16])
+def test_sampler_meta_is_self_consistent(technique, kind, fs_mult):
+    params = make_params(20)
+    fm = 5.0
+    duration = 1.0
+
+    res = run(
+        kind, technique, params,
+        Am=1.0, fm=fm, duration=duration,
+        fs_mult=fs_mult, pcm_nbits=4, dm_delta=0.1,
+        linecode_scheme="NRZ-L",
+    )
+
+    meta = res.meta
+    sampler = meta["sampler"]
+    sampled = meta["sampled"]
+
+    assert int(meta["fs_mult"]) == int(fs_mult)
+    assert int(sampler["fs_mult"]) == int(fs_mult)
+
+    fs_samp = float(sampler["fs_samp"])
+    Ts = float(sampler["Ts"])
+
+    assert fs_samp == pytest.approx(float(fs_mult) * float(fm))
+    assert Ts == pytest.approx(1.0 / fs_samp)
+
+    t_s = np.asarray(sampled["t_s"], dtype=float)
+    m_s = np.asarray(sampled["m_s"], dtype=float)
+
+    assert len(t_s) == len(m_s) == int(sampler["num_samples"])
+    if len(t_s) > 0:
+        assert t_s[0] == pytest.approx(0.0)
+        assert t_s[-1] < duration + 1e-12  # endpoint excluded by design
+        if len(t_s) > 1:
+            assert np.allclose(np.diff(t_s), Ts, atol=1e-12, rtol=0.0)
 
 # ===========================================
 # 2) Roundtrip grid: all techniques and kinds
@@ -264,6 +301,27 @@ def test_linecode_roundtrip_all_variants(Ns, linecode, kind, technique):
     else:
         assert bit_len == num_samples
 
+@pytest.mark.parametrize("linecode", LINECODES)
+def test_t_bits_axis_matches_linecode_and_has_correct_spacing(linecode):
+    params = make_params(20)
+    res = run(
+        "sine",
+        "PCM",
+        params,
+        Am=1.0, fm=5.0, duration=1.0,
+        fs_mult=8, pcm_nbits=4,
+        linecode_scheme=linecode,
+    )
+    assert_linecode_match(res)
+
+    t_bits = np.asarray(res.meta["t_bits"], dtype=float)
+    wave = np.asarray(res.signals["linecode"], dtype=float)
+
+    assert len(t_bits) == len(wave)
+    if len(t_bits) > 1:
+        dt = np.diff(t_bits)
+        assert np.allclose(dt, 1.0 / float(params.fs), atol=1e-12, rtol=0.0)
+
 
 # ==================================
 # 3) Linecode waveform level invariants
@@ -293,6 +351,27 @@ def test_linecode_wave_levels_subset(Ns, linecode):
     # Manchester must use even Ns internally
     if linecode == "Manchester":
         assert ns_used(res, params) % 2 == 0
+
+@pytest.mark.parametrize("Ns_in, Ns_expected", [(20, 20), (21, 22)])
+def test_manchester_odd_Ns_rounds_up_by_one(Ns_in, Ns_expected):
+    params = make_params(Ns_in)
+    res = run(
+        "sine",
+        "PCM",
+        params,
+        Am=1.0, fm=5.0, duration=1.0,
+        fs_mult=8, pcm_nbits=3,
+        linecode_scheme="Manchester",
+    )
+    assert_linecode_match(res)
+
+    bit_len = int(res.meta["linecode"]["bit_len"])
+    wave_len = len(res.signals["linecode"])
+    assert bit_len > 0
+    assert wave_len % bit_len == 0
+
+    Ns_actual = wave_len // bit_len
+    assert Ns_actual == Ns_expected
 
 
 # ==================================
@@ -371,6 +450,31 @@ def test_pcm_quantizer_invariants(kind, n_bits):
     # SNR estimate from book should be correct
     snr_est = float(pcm["snr_db_est"])
     assert abs(snr_est - (6.02 * n_bits + 1.76)) < 1e-12
+
+@pytest.mark.parametrize("n_bits", [2, 4, 6])
+def test_pcm_decode_meta_has_no_remainder_and_counts_match(n_bits):
+    params = make_params(20)
+
+    res = run(
+        "sine",
+        "PCM",
+        params,
+        Am=1.0, fm=5.0, duration=1.0,
+        fs_mult=8, pcm_nbits=n_bits,
+        linecode_scheme="NRZ-L",
+    )
+    assert_linecode_match(res)
+
+    num_samples = int(res.meta["sampler"]["num_samples"])
+    pcm_rx = res.meta["pcm_rx"]
+    dec_meta = pcm_rx["decode_meta"]
+
+    assert int(dec_meta["remainder_bits"]) == 0
+    assert int(dec_meta["n_codewords"]) == num_samples
+
+    idx_hat = np.asarray(pcm_rx["idx_hat"], dtype=int)
+    q_hat = np.asarray(pcm_rx["q_hat"], dtype=float)
+    assert len(idx_hat) == len(q_hat) == num_samples
 
 
 # ==============================
@@ -468,6 +572,32 @@ def test_duration_zero_returns_empty_signals_and_bits(technique):
     assert res.bits["decoded_bitstream"] == []
     assert_linecode_match(res)  # empty==empty should match
 
+@pytest.mark.parametrize("technique", TECHNIQUES)
+def test_duration_shorter_than_Ts_produces_one_sample(technique):
+    params = make_params(20)
+    fm = 1.0
+    fs_mult = 2          # fs_samp = 2 Hz -> Ts = 0.5 s
+    duration = 0.1       # < Ts -> only one sample at t=0
+
+    res = run(
+        "sine",
+        technique,
+        params,
+        Am=1.0, fm=fm, duration=duration,
+        fs_mult=fs_mult, pcm_nbits=3, dm_delta=0.1,
+        linecode_scheme="NRZ-L",
+    )
+
+    assert int(res.meta["sampler"]["num_samples"]) == 1
+    assert len(res.meta["sampled"]["t_s"]) == 1
+
+    if technique == "PCM":
+        assert len(res.bits["bitstream"]) == 3
+    else:
+        assert len(res.bits["bitstream"]) == 1
+
+    assert_linecode_match(res)
+
 
 # =====================================================
 # 7) Deterministic fuzz tests (seeded, moderate sizes)
@@ -540,6 +670,6 @@ def test_seeded_fuzz_dm(seed):
 
 
 # ==========================================
-# 8) Long-run stress tests (to be added later)
+# 8) Long-run stress tests
 # ==========================================
 # TODO: Implement long-run stress tests for A2D (PCM + DM) later.

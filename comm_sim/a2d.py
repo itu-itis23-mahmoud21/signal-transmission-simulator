@@ -222,9 +222,15 @@ def simulate_a2d(
         raise ValueError("technique must be PCM or DM")
 
     # --- Sampling rate for PAM ---
-    fs_samp = float(int(fs_mult)) * float(fm)
-    if fs_samp <= 0:
-        fs_samp = 8.0 * float(fm)
+    fm = float(fm)
+    fs_mult = int(fs_mult)
+    
+    if fm <= 0:
+        raise ValueError("fm must be positive.")
+    if fs_mult <= 0:
+        raise ValueError("fs_mult must be positive.")
+    
+    fs_samp = float(fs_mult) * fm
     Ts = 1.0 / fs_samp
 
     # exact PAM sampling
@@ -252,6 +258,7 @@ def simulate_a2d(
         "Am": float(Am),
         "fm": float(fm),
         "duration": float(duration),
+        "fs_mult": int(fs_mult),  # <-- add this
         "sampler": {
             "fs_samp": float(fs_samp),
             "Ts": float(Ts),
