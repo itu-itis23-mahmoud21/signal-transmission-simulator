@@ -1633,6 +1633,57 @@ elif mode == "Analog → Digital":
         st.subheader("Line coding for produced bitstream")
         linecode_scheme = st.selectbox("Line code", ["NRZ-L", "Manchester", "NRZI", "Bipolar-AMI"])
 
+        # --- Show defaults for selected line code (like D2D/D2A tables) ---
+        def _a2d_linecode_defaults_table(scheme: str, Ns: int):
+            Ns = int(Ns)
+            Ns_even = Ns if (Ns % 2 == 0) else (Ns + 1)
+
+            # Defaults (aligned with what you observed in D2D)
+            # NRZ-L: assumed previous level High (+A)
+            # NRZI: assumed previous level Low (-A)
+            # Manchester: assumed preceding bit = 1
+            # AMI: most recent preceding '1' polarity = Negative (-A)
+            if scheme == "NRZ-L":
+                rows = [
+                    {"Item": "Rule", "Default": "0 → +A, 1 → −A"},
+                    {"Item": "Assumed level BEFORE first bit", "Default": "High (+A)"},
+                ]
+
+            elif scheme == "NRZI":
+                rows = [
+                    {"Item": "Rule", "Default": "1 → transition; 0 → no transition"},
+                    {"Item": "Assumed level BEFORE first bit", "Default": "Low (-A)"},
+                ]
+
+            elif scheme == "Manchester":
+                rows = [
+                    {"Item": "Rule", "Default": "1: low→high, 0: high→low"},
+                    {"Item": "Assumed preceding bit", "Default": "1"},
+                ]
+
+            elif scheme == "Bipolar-AMI":
+                rows = [
+                    {"Item": "Rule", "Default": "0 → 0; 1 → alternates +A, −A"},
+                    {"Item": "Scrambling", "Default": "None"},
+                    {"Item": "Most recent preceding '1' polarity", "Default": "Negative (-A)"},
+                ]
+
+            else:
+                rows = [{"Item": "Defaults", "Default": "Not defined"}]
+
+            df = pd.DataFrame(rows)
+            st.dataframe(
+                df,
+                hide_index=True,
+                width="stretch",
+                column_config={
+            "Item": st.column_config.TextColumn("Item", width="medium"),
+            "Default": st.column_config.TextColumn("Default", width="medium"),
+        },
+    )
+
+        _a2d_linecode_defaults_table(linecode_scheme, params.samples_per_bit)
+
         run = st.button("Run simulation", type="primary", key="a2d_run")
 
     # --- A2D run state (live like D2D/D2A) ---
@@ -1698,7 +1749,15 @@ elif mode == "Analog → Digital":
 
             fig = go.Figure()
             fig.add_trace(go.Scatter(x=res.t, y=res.signals["m(t)"], mode="lines", name="m(t)"))
-            fig.add_trace(go.Scatter(x=t_s, y=m_s, mode="markers", name="PAM samples"))
+            fig.add_trace(
+                go.Scatter(
+                    x=t_s,
+                    y=m_s,
+                    mode="markers",
+                    name="PAM samples",
+                    marker=dict(color="#FF4B4B", size=8),  # Streamlit-like red; adjust if you want
+                )
+            )
             fig.update_layout(title="PAM sampling (message with sampled points)", xaxis_title="Time (s)", yaxis_title="Amplitude")
             fig.update_layout(
                 legend=dict(
@@ -1724,9 +1783,22 @@ elif mode == "Analog → Digital":
 
             if stair_tx is not None:
                 fig2 = go.Figure()
-                fig2.add_trace(go.Scatter(x=stair_tx["t_s"], y=stair_tx["x"], mode="lines", line_shape="hv", name="TX staircase"))
+                fig2.add_trace(go.Scatter(
+                    x=stair_tx["t_s"], y=stair_tx["x"],
+                    mode="lines",
+                    line_shape="hv",
+                    name="TX staircase",
+                    opacity=0.7,
+                ))
                 if stair_rx is not None:
-                    fig2.add_trace(go.Scatter(x=stair_rx["t_s"], y=stair_rx["x"], mode="lines", line_shape="hv", name="RX staircase"))
+                    fig2.add_trace(go.Scatter(
+                        x=stair_rx["t_s"], y=stair_rx["x"],
+                        mode="lines",
+                        line_shape="hv",
+                        name="RX staircase",
+                        line=dict(color="#FF4B4B", dash="dash", width=2),
+                        opacity=0.9,
+                    ))
                 title = "PCM Quantized Staircase (TX vs RX)" if technique == "PCM" else "Delta Modulation Staircase (TX vs RX)"
                 fig2.update_layout(title=title, xaxis_title="Time (s)", yaxis_title="Amplitude")
                 fig2.update_layout(
@@ -1754,6 +1826,7 @@ elif mode == "Analog → Digital":
             figrtx.update_layout(margin=common_margin, showlegend=False)
             st.plotly_chart(figrtx, width="stretch")
             figrrx = plot_signal(res.t, res.signals["recon_rx"], "Reconstructed (RX, after line-decode + codec decode)", grid=show_grid)
+            figrrx.update_traces(line=dict(color="#FF4B4B"))
             figrrx.update_xaxes(range=[0, duration], autorange=False)
             figrrx.update_xaxes(tickmode="array", tickvals=tickvals)
             figrrx.update_layout(margin=common_margin, showlegend=False)
