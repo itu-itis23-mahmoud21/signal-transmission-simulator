@@ -288,7 +288,13 @@ def summary_block(meta: dict):
         width=700, 
     )
 
-def dict_to_pretty_table(data: dict, *, width: int = 700):
+def dict_to_pretty_table(
+    data: dict,
+    *,
+    width: int = 700,
+    float_formats: dict[str, str] | None = None,
+    default_float_fmt: str | None = None,
+):
     """
     Render a dict as a 2-column zebra-striped table (like Summary).
     Falls back to showing non-scalars as compact strings.
@@ -298,13 +304,43 @@ def dict_to_pretty_table(data: dict, *, width: int = 700):
         return
 
     rows = []
+
+    def _fmt_scalar(key: str, val):
+        # ints -> clean int
+        if isinstance(val, (np.integer, int)):
+            return str(int(val))
+
+        # floats -> formatted string
+        if isinstance(val, (np.floating, float)):
+            xf = float(val)
+            if not np.isfinite(xf):
+                return str(xf)
+
+            spec = None
+            if isinstance(float_formats, dict) and key in float_formats:
+                spec = float_formats[key]
+            elif default_float_fmt is not None:
+                spec = default_float_fmt
+
+            if spec is None:
+                return xf  # keep raw numeric
+
+            s = format(xf, spec)
+            # trim trailing zeros for fixed-point formats
+            if "." in s:
+                s = s.rstrip("0").rstrip(".")
+            return s
+
+        if val is None:
+            return ""
+        return str(val)
+
     for k, v in data.items():
-        # Keep simple scalars as-is
-        if isinstance(v, (str, int, float, bool, type(None), np.floating)):
-            rows.append({"Field": str(k), "Value": v})
+        key = str(k)
+        if isinstance(v, (str, int, float, bool, type(None), np.floating, np.integer)):
+            rows.append({"Field": key, "Value": _fmt_scalar(key, v)})
         else:
-            # For lists/dicts/arrays: show compact text (readable, not huge JSON)
-            rows.append({"Field": str(k), "Value": str(v)})
+            rows.append({"Field": key, "Value": str(v)})
 
     df = pd.DataFrame(rows)
 
@@ -2045,7 +2081,28 @@ elif mode == "Analog → Analog":
     # ---- Summary ----
     st.subheader("Summary")
     summ = res.meta.get("summary", {})
-    dict_to_pretty_table(summ, width=700)
+
+    # UI formatting (match how the inputs are shown)
+    a2a_summary_fmt = {
+        "fs": ".0f",
+        "fc": ".2f",
+        "Ac": ".2f",
+        "fm": ".2f",
+        "Am": ".2f",
+        "duration": ".2f",
+        "na": ".2f",
+        "mu": ".2f",
+        "BW_hint_Hz": ".0f",
+        # (future-proof for FM/PM)
+        "kf": ".2f",
+        "kp": ".2f",
+        "Δf_max_Hz": ".2f",
+        "β": ".3f",
+        "BW_Carson_Hz": ".0f",
+        "Δφ_max_rad": ".3f",
+    }
+
+    dict_to_pretty_table(summ, width=700, float_formats=a2a_summary_fmt, default_float_fmt=".6g")
 
     # Shared X-axis formatting (align plots vertically like in A2D)
     tickvals = list(np.arange(0.0, float(duration) + 1e-9, 0.5))
@@ -2084,8 +2141,24 @@ elif mode == "Analog → Analog":
 
         if scheme == "AM" and ("envelope_theory" in res.signals):
             env = res.signals["envelope_theory"]
-            figtx.add_trace(go.Scatter(x=res.t, y=env, mode="lines", name="+Envelope (theory)", line=dict(dash="dash"), opacity=0.85))
-            figtx.add_trace(go.Scatter(x=res.t, y=-env, mode="lines", name="-Envelope (theory)", line=dict(dash="dash"), opacity=0.85))
+            figtx.add_trace(
+                go.Scatter(
+                    x=res.t, y=env,
+                    mode="lines",
+                    name="+Envelope (theory)",
+                    line=dict(dash="dash", color="#00BFA5", width=2),
+                    opacity=0.90,
+                )
+            )
+            figtx.add_trace(
+                go.Scatter(
+                    x=res.t, y=-env,
+                    mode="lines",
+                    name="-Envelope (theory)",
+                    line=dict(dash="dash", color="#7E57C2", width=2),
+                    opacity=0.90,
+                )
+            )
 
         figtx.update_layout(
             title=f"Modulated signal s(t) ({scheme})",
@@ -2103,7 +2176,8 @@ elif mode == "Analog → Analog":
 
         # 3) Recovered vs original (overlay)
         figr = go.Figure()
-        figr.add_trace(go.Scatter(x=res.t, y=res.signals["m(t)"], mode="lines", name="m(t) (original)", opacity=0.55))
+
+        # Draw RX first (so original can sit "above" it)
         figr.add_trace(
             go.Scatter(
                 x=res.t,
@@ -2111,6 +2185,19 @@ elif mode == "Analog → Analog":
                 mode="lines",
                 name="Recovered (RX)",
                 line=dict(color="#ff4b4b", width=2),
+                opacity=0.95,
+            )
+        )
+
+        # Draw original dashed on top with opacity
+        figr.add_trace(
+            go.Scatter(
+                x=res.t,
+                y=res.signals["m(t)"],
+                mode="lines",
+                name="m(t) (original)",
+                line=dict(dash="dash", width=2),
+                opacity=0.55,
             )
         )
         figr.update_layout(
@@ -2148,6 +2235,32 @@ elif mode == "Analog → Analog":
             if mu > 1.0:
                 st.warning(f"AM overmodulation detected (μ={mu:.2f} > 1). Envelope will cross zero and envelope detection distorts.")
 
+        # Steps table
+        steps = [
+            {"Stage": "1) Message", "Description": "Generate analog message m(t) from chosen waveform (sine/square/triangle)."},
+            {"Stage": "2) Carrier", "Description": "Generate carrier c(t)=cos(2π f_c t)."},
+        ]
+        if scheme == "AM":
+            steps.append({"Stage": "3) AM modulator", "Description": "Book (DSBTC): s(t) = A_c[1 + n_a x(t)]cos(2πf_ct), with x(t)=m(t)/max|m(t)|."})
+            steps.append({"Stage": "4) (Ideal) AM demod", "Description": "Envelope estimate via analytic signal; x̂(t) ≈ (env/A_c − 1)/n_a, then m̂(t)=x̂·max|m(t)|."})
+        elif scheme == "FM":
+            steps.append({"Stage": "3) FM modulator", "Description": "s(t)=A_c cos(2π f_c t + 2π k_f ∫ m(τ)dτ)."})
+            steps.append({"Stage": "4) (Ideal) FM demod", "Description": "Instantaneous frequency from phase derivative; m̂(t) ≈ (f_i(t)−f_c)/k_f."})
+        else:
+            steps.append({"Stage": "3) PM modulator", "Description": "s(t)=A_c cos(2π f_c t + k_p m(t))."})
+            steps.append({"Stage": "4) (Ideal) PM demod", "Description": "Phase deviation from analytic phase; m̂(t) ≈ (φ(t)−2πf_ct)/k_p."})
+
+        dfs = pd.DataFrame(steps)
+        st.dataframe(
+            dfs,
+            hide_index=True,
+            width=1000,
+            column_config={
+                "Stage": st.column_config.TextColumn("Stage", width="medium"),
+                "Description": st.column_config.TextColumn("Description", width="large"),
+            },
+        )
+        
         # Parameters (expandable)
         with st.expander("A2A parameters and derived values", expanded=True):
             rows = [
@@ -2189,39 +2302,56 @@ elif mode == "Analog → Analog":
             st.dataframe(
                 dfp,
                 hide_index=True,
-                width="stretch",
+                width=700,
                 column_config={
                     "Item": st.column_config.TextColumn("Item", width="medium"),
                     "Value": st.column_config.TextColumn("Value", width="medium"),
                 },
             )
-
-        # Steps table
-        steps = [
-            {"Stage": "1) Message", "Description": "Generate analog message m(t) from chosen waveform (sine/square/triangle)."},
-            {"Stage": "2) Carrier", "Description": "Generate carrier c(t)=cos(2π f_c t)."},
-        ]
-        if scheme == "AM":
-            steps.append({"Stage": "3) AM modulator", "Description": "Book (DSBTC): s(t) = A_c[1 + n_a x(t)]cos(2πf_ct), with x(t)=m(t)/max|m(t)|."})
-            steps.append({"Stage": "4) (Ideal) AM demod", "Description": "Envelope estimate via analytic signal; m̂(t) ≈ (env−A_c)/k_a."})
-        elif scheme == "FM":
-            steps.append({"Stage": "3) FM modulator", "Description": "s(t)=A_c cos(2π f_c t + 2π k_f ∫ m(τ)dτ)."})
-            steps.append({"Stage": "4) (Ideal) FM demod", "Description": "Instantaneous frequency from phase derivative; m̂(t) ≈ (f_i(t)−f_c)/k_f."})
-        else:
-            steps.append({"Stage": "3) PM modulator", "Description": "s(t)=A_c cos(2π f_c t + k_p m(t))."})
-            steps.append({"Stage": "4) (Ideal) PM demod", "Description": "Phase deviation from analytic phase; m̂(t) ≈ (φ(t)−2πf_ct)/k_p."})
-
-        dfs = pd.DataFrame(steps)
-        st.dataframe(
-            dfs,
-            hide_index=True,
-            width="stretch",
-            column_config={
-                "Stage": st.column_config.TextColumn("Stage", width="medium"),
-                "Description": st.column_config.TextColumn("Description", width="large"),
-            },
-        )
+        # ---- Debug at end ----
+        with st.expander("Full metadata (debug)", expanded=False):
+            st.json(res.meta)
 
     with tab3:
-        st.write("Full metadata (for debugging):")
-        st.json(res.meta)
+        m0 = np.asarray(res.signals.get("m(t)", []), dtype=float)
+        mr = np.asarray(res.signals.get("recovered", []), dtype=float)
+
+        n = int(min(m0.size, mr.size))
+        if n == 0:
+            st.info("No signals to compare.")
+            st.stop()
+
+        m0 = m0[:n]
+        mr = mr[:n]
+
+        err = mr - m0
+        mse = float(np.mean(err ** 2))
+        rmse = float(np.sqrt(mse))
+        peak = float(np.max(np.abs(m0))) if np.max(np.abs(m0)) > 0 else 1.0
+        nrmse = float(rmse / peak)
+
+        # correlation (guard against constant signals)
+        if np.std(m0) < 1e-12 or np.std(mr) < 1e-12:
+            corr = float("nan")
+        else:
+            corr = float(np.corrcoef(m0, mr)[0, 1])
+
+        # practical match rule for visualization correctness
+        match = (nrmse < 0.05) and (np.isfinite(corr) and corr > 0.99)
+
+        st.subheader("Input vs output check")
+        if match:
+            st.success("MATCH (recovered ≈ original)")
+        else:
+            st.error("MISMATCH (recovered deviates from original)")
+
+        metrics = {
+            "Samples compared": n,
+            "RMSE": rmse,
+            "NRMSE (RMSE / peak|m|)": nrmse,
+            "Correlation": corr,
+            "Original peak |m(t)|": peak,
+            "Max abs error": float(np.max(np.abs(err))),
+            "Mean error": float(np.mean(err)),
+        }
+        dict_to_pretty_table(metrics, width=700, default_float_fmt=".6g")
