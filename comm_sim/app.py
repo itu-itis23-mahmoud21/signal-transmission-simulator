@@ -1619,7 +1619,7 @@ elif mode == "Analog → Digital":
         fm = st.slider("Message frequency fm (Hz)", 1.0, 50.0, 5.0, step=1.0)
         duration = st.slider("Duration (s)", 0.5, 5.0, 2.0, step=0.5)
 
-        st.subheader("Sampling")
+        st.subheader("Sampling (PAM)")
         fs_mult = st.select_slider("Sampling multiplier (×fm)", options=[4, 8, 16, 32], value=8)
 
         st.subheader("Technique parameters")
@@ -1639,7 +1639,6 @@ elif mode == "Analog → Digital":
     if "a2d_last" not in st.session_state:
         st.session_state["a2d_last"] = None
 
-    # Run only on click, then store
     if run:
         res = simulate_a2d(
             kind, technique, params,
@@ -1651,41 +1650,63 @@ elif mode == "Analog → Digital":
         )
         st.session_state["a2d_last"] = res
 
-    # Always display either empty state or last result
     res = st.session_state.get("a2d_last", None)
     if res is None:
         empty_state()
     else:
+        # Summary (use existing helper)
+        summ = res.meta.get("summary", {})
+        summary_block(summ)
+
         tab1, tab3, tab4 = st.tabs(["Waveforms", "Steps", "Details"])
 
         with tab1:
+            # 1) analog message
             st.plotly_chart(
                 plot_signal(res.t, res.signals["m(t)"], "Message m(t)", grid=show_grid),
                 width="stretch",
             )
 
-            # sampled points
+            # 2) message + PAM samples
             t_s = res.meta["sampled"]["t_s"]
             m_s = res.meta["sampled"]["m_s"]
+
             fig = go.Figure()
             fig.add_trace(go.Scatter(x=res.t, y=res.signals["m(t)"], mode="lines", name="m(t)"))
-            fig.add_trace(go.Scatter(x=t_s, y=m_s, mode="markers", name="Samples"))
-            fig.update_layout(title="Message with sampled points", xaxis_title="Time (s)", yaxis_title="Amplitude")
+            fig.add_trace(go.Scatter(x=t_s, y=m_s, mode="markers", name="PAM samples"))
+            fig.update_layout(title="PAM sampling (message with sampled points)", xaxis_title="Time (s)", yaxis_title="Amplitude")
+            if show_grid:
+                fig.update_xaxes(showgrid=True)
+                fig.update_yaxes(showgrid=True)
             st.plotly_chart(fig, width="stretch")
 
-            if technique == "PCM":
-                q = res.meta["quantized"]["q"]
+            # 3) Staircase (TX) + (RX)
+            stair_tx = res.meta.get("stair_tx", None)
+            stair_rx = res.meta.get("stair_rx", None)
+
+            if stair_tx is not None:
                 fig2 = go.Figure()
-                fig2.add_trace(go.Scatter(x=t_s, y=q, mode="lines", line_shape="hv", name="Quantized (stair)"))
-                fig2.update_layout(title="PCM Quantized Staircase", xaxis_title="Time (s)", yaxis_title="Amplitude")
-                st.plotly_chart(fig2, width="stretch")
-            else:
-                stair = res.meta["stair"]["stair"]
-                fig2 = go.Figure()
-                fig2.add_trace(go.Scatter(x=t_s, y=stair, mode="lines", line_shape="hv", name="DM Staircase"))
-                fig2.update_layout(title="Delta Modulation Staircase", xaxis_title="Time (s)", yaxis_title="Amplitude")
+                fig2.add_trace(go.Scatter(x=stair_tx["t_s"], y=stair_tx["x"], mode="lines", line_shape="hv", name="TX staircase"))
+                if stair_rx is not None:
+                    fig2.add_trace(go.Scatter(x=stair_rx["t_s"], y=stair_rx["x"], mode="lines", line_shape="hv", name="RX staircase"))
+                title = "PCM Quantized Staircase (TX vs RX)" if technique == "PCM" else "Delta Modulation Staircase (TX vs RX)"
+                fig2.update_layout(title=title, xaxis_title="Time (s)", yaxis_title="Amplitude")
+                if show_grid:
+                    fig2.update_xaxes(showgrid=True)
+                    fig2.update_yaxes(showgrid=True)
                 st.plotly_chart(fig2, width="stretch")
 
+            # 4) Reconstructed signal on dense axis (ZOH)
+            st.plotly_chart(
+                plot_signal(res.t, res.signals["recon_tx"], "Reconstructed (TX, ZOH on display axis)", grid=show_grid),
+                width="stretch",
+            )
+            st.plotly_chart(
+                plot_signal(res.t, res.signals["recon_rx"], "Reconstructed (RX, after line-decode + codec decode)", grid=show_grid),
+                width="stretch",
+            )
+
+            # 5) Line-coded waveform
             t_bits = res.meta["t_bits"]
             st.plotly_chart(
                 plot_signal(
@@ -1699,14 +1720,79 @@ elif mode == "Analog → Digital":
                 width="stretch",
             )
 
+            # 6) Show decoded bitstream as step (optional but useful)
+            dec_bits = res.bits.get("decoded_bitstream", [])
+            if isinstance(dec_bits, list) and len(dec_bits) > 0:
+                t_dec = np.arange(len(dec_bits) * Ns) / params.fs
+                x_dec = bits_to_step(dec_bits, Ns)
+                st.plotly_chart(
+                    plot_signal(t_dec, x_dec, "Decoded bitstream (0/1) after line decoding", grid=show_grid, step=True, x_dtick=params.Tb, y_dtick=1),
+                    width="stretch",
+                )
+
         with tab3:
-            st.json(res.meta)
+            # Steps table (book-style)
+            if technique == "PCM":
+                steps = res.meta.get("pcm", {}).get("steps", [])
+                if isinstance(steps, list) and len(steps) > 0:
+                    st.subheader("PCM steps (PAM → Quantizer → Encoder)")
+                    render_events_table(steps, width=1100)
+
+                    pcm = res.meta.get("pcm", {})
+                    with st.expander("PCM parameters", expanded=True):
+                        dict_to_pretty_table({
+                            "n_bits": pcm.get("n_bits"),
+                            "L": pcm.get("L"),
+                            "delta": pcm.get("delta"),
+                            "vmin": pcm.get("vmin"),
+                            "vmax": pcm.get("vmax"),
+                            "snr_db_est (6.02n+1.76)": pcm.get("snr_db_est"),
+                        }, width=700)
+                else:
+                    st.info("No PCM steps available.")
+
+            else:
+                steps = res.meta.get("dm", {}).get("steps", [])
+                if isinstance(steps, list) and len(steps) > 0:
+                    st.subheader("DM steps (Comparator + ±Δ staircase)")
+                    render_events_table(steps, width=1100)
+
+                    dm = res.meta.get("dm", {})
+                    with st.expander("DM parameters", expanded=True):
+                        dict_to_pretty_table({
+                            "delta": dm.get("delta"),
+                            "est0": dm.get("est0"),
+                        }, width=700)
+                else:
+                    st.info("No DM steps available.")
+
+            # Linecode summary
+            with st.expander("Line coding stage", expanded=True):
+                lc = res.meta.get("linecode", {})
+                dict_to_pretty_table({
+                    "scheme": lc.get("scheme"),
+                    "match": lc.get("match"),
+                    "bit_len": lc.get("bit_len"),
+                }, width=700)
 
         with tab4:
-            bits = res.bits["bitstream"]
-            s = "".join("1" if b else "0" for b in bits)
-            st.write(f"Bitstream length: {len(bits)}")
-            st.code(s[:500] + ("..." if len(s) > 500 else ""))
+            bits_tx = res.bits.get("bitstream", [])
+            bits_rx = res.bits.get("decoded_bitstream", [])
+
+            s_tx = "".join("1" if b else "0" for b in bits_tx)
+            s_rx = "".join("1" if b else "0" for b in bits_rx)
+
+            st.write(f"TX bitstream length: {len(bits_tx)}")
+            st.code(s_tx[:500] + ("..." if len(s_tx) > 500 else ""))
+
+            st.write(f"Decoded bitstream length: {len(bits_rx)}")
+            st.code(s_rx[:500] + ("..." if len(s_rx) > 500 else ""))
+
+            st.write("Match (after line decode):")
+            if bool(res.meta.get("linecode", {}).get("match", False)):
+                st.success("MATCH")
+            else:
+                st.error("MISMATCH")
 
 
 elif mode == "Analog → Analog":
