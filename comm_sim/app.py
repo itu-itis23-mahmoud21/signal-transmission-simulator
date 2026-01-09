@@ -2146,7 +2146,7 @@ elif mode == "Analog → Analog":
                     x=res.t, y=env,
                     mode="lines",
                     name="+Envelope (theory)",
-                    line=dict(dash="dash", color="#00BFA5", width=2),
+                    line=dict(dash="dash", color="#C9FF05", width=2),
                     opacity=0.90,
                 )
             )
@@ -2155,7 +2155,7 @@ elif mode == "Analog → Analog":
                     x=res.t, y=-env,
                     mode="lines",
                     name="-Envelope (theory)",
-                    line=dict(dash="dash", color="#7E57C2", width=2),
+                    line=dict(dash="dash", color="#AA00FF", width=2),
                     opacity=0.90,
                 )
             )
@@ -2197,7 +2197,7 @@ elif mode == "Analog → Analog":
                 mode="lines",
                 name="m(t) (original)",
                 line=dict(dash="dash", width=2),
-                opacity=0.55,
+                opacity=0.75,
             )
         )
         figr.update_layout(

@@ -83,7 +83,7 @@ def am_modulate(x_t: np.ndarray, t: np.ndarray, *, Ac: float, fc: float, na: flo
 
     where x(t) is normalized to unit amplitude (max|x| = 1).
     """
-    return float(Ac) * (1.0 + float(na) * x_t) * np.cos(2 * np.pi * float(fc) * t)
+    return float(Ac) * (1.0 + float(na) * x_t) * np.sin(2 * np.pi * float(fc) * t)
 
 
 def pm_modulate(m_t: np.ndarray, t: np.ndarray, *, Ac: float, fc: float, kp: float) -> np.ndarray:
@@ -91,7 +91,7 @@ def pm_modulate(m_t: np.ndarray, t: np.ndarray, *, Ac: float, fc: float, kp: flo
     Phase modulation (PM):
       s(t) = Ac cos(2π f_c t + kp * m(t))
     """
-    return float(Ac) * np.cos(2 * np.pi * float(fc) * t + float(kp) * m_t)
+    return float(Ac) * np.sin(2 * np.pi * float(fc) * t + float(kp) * m_t)
 
 
 def fm_modulate(
@@ -107,7 +107,7 @@ def fm_modulate(
     fs = float(fs)
     integral = np.cumsum(m_t) / fs  # ∫ m(t) dt (rectangular integration)
     phase = 2 * np.pi * float(fc) * t + 2 * np.pi * float(kf) * integral
-    return float(Ac) * np.cos(phase)
+    return float(Ac) * np.sin(phase)
 
 
 # -----------------------------
@@ -123,8 +123,7 @@ def am_demodulate_envelope(
     pad = max(8, int(round(0.01 * fs)))  # ~10 ms padding
     env_est, _ = _analytic_amp_phase(s_t, pad=pad)
 
-    # light smoothing helps the envelope look stable at high carrier frequencies
-    win = max(1, int(round(fs / max(1.0, fc) * 0.25)))
+    win = max(1, int(round(fs / max(1.0, fc) * 1.0)))
     env_est = _moving_average(env_est, win)
     if env_est.size >= 2:
         env_est[0] = env_est[1]
@@ -258,7 +257,7 @@ def simulate_a2a(
 
     # message
     m = gen_message(t, kind, Am, fm) if N > 0 else np.array([], dtype=float)
-    carrier = np.cos(2 * np.pi * fc * t) if N > 0 else np.array([], dtype=float)
+    carrier = np.sin(2 * np.pi * fc * t) if N > 0 else np.array([], dtype=float)
 
     meta: Dict[str, Any] = {
         "scheme": scheme,
