@@ -1859,29 +1859,42 @@ elif mode == "Analog → Digital":
         with tab3:
             # Steps table (book-style)
             if technique == "PCM":
-                steps = res.meta.get("pcm", {}).get("steps", [])
-                if isinstance(steps, list) and len(steps) > 0:
-                    st.subheader("PCM steps (PAM → Quantizer → Encoder)")
-                    render_events_table(steps, width=1100)
+                pcm = res.meta.get("pcm", {})
+                steps = pcm.get("steps", [])
 
-                    pcm = res.meta.get("pcm", {})
-                    with st.expander("PCM parameters", expanded=True):
-                        dict_to_pretty_table({
-                            "n_bits": pcm.get("n_bits"),
-                            "L": pcm.get("L"),
-                            "delta": pcm.get("delta"),
-                            "vmin": pcm.get("vmin"),
-                            "vmax": pcm.get("vmax"),
-                            "snr_db_est (6.02n+1.76)": pcm.get("snr_db_est"),
-                        }, width=700)
-                else:
-                    st.info("No PCM steps available.")
+                # --- PCM parameters (formatted) ---
+                def _fmt(x, spec: str) -> str:
+                    if x is None:
+                        return ""
+                    try:
+                        return format(float(x), spec)
+                    except Exception:
+                        return str(x)
+
+                pcm_params_display = {
+                    "n_bits": int(pcm.get("n_bits")) if pcm.get("n_bits") is not None else "",
+                    "L = 2^n": int(pcm.get("L")) if pcm.get("L") is not None else "",
+                    "Δ (quantization step)": _fmt(pcm.get("delta"), ".6g"),      # e.g., 0.125 or 1.25e-3
+                    "vmin": _fmt(pcm.get("vmin"), ".3f"),                      # e.g., -1.000
+                    "vmax": _fmt(pcm.get("vmax"), ".3f"),                      # e.g., +1.000
+                    "SNR est (dB) = 6.02n + 1.76": _fmt(pcm.get("snr_db_est"), ".2f"),
+                }
+
+                st.subheader("PCM parameters")
+                dict_to_pretty_table(pcm_params_display, width=700)
+
+                # --- PCM steps (PAM → Quantizer → Encoder) ---
+                with st.expander("PCM steps (PAM → Quantizer → Encoder)", expanded=False):
+                    if isinstance(steps, list) and len(steps) > 0:
+                        render_events_table(steps, width=1000)
+                    else:
+                        st.info("No PCM steps available.")
 
             else:
                 steps = res.meta.get("dm", {}).get("steps", [])
                 if isinstance(steps, list) and len(steps) > 0:
                     st.subheader("DM steps (Comparator + ±Δ staircase)")
-                    render_events_table(steps, width=1100)
+                    render_events_table(steps, width=1000)
 
                     dm = res.meta.get("dm", {})
                     with st.expander("DM parameters", expanded=True):
@@ -1891,15 +1904,6 @@ elif mode == "Analog → Digital":
                         }, width=700)
                 else:
                     st.info("No DM steps available.")
-
-            # Linecode summary
-            with st.expander("Line coding stage", expanded=True):
-                lc = res.meta.get("linecode", {})
-                dict_to_pretty_table({
-                    "scheme": lc.get("scheme"),
-                    "match": lc.get("match"),
-                    "bit_len": lc.get("bit_len"),
-                }, width=700)
 
         with tab4:
             bits_tx = res.bits.get("bitstream", [])
