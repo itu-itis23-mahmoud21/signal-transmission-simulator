@@ -50,11 +50,27 @@ def _analytic_amp_phase(x: np.ndarray, *, pad: int = 0) -> Tuple[np.ndarray, np.
 
 
 def _moving_average(x: np.ndarray, win: int) -> np.ndarray:
+    """
+    Moving average with reflect-padding to avoid edge artifacts.
+    Ensures output length == input length and avoids "drop-to-zero" at boundaries.
+    """
     if win <= 1:
         return x
+    x = np.asarray(x, dtype=float)
+    if x.size == 0:
+        return x
+
     win = int(win)
+
+    # Prefer odd window for exact length match after reflect-padding + valid convolution
+    if win % 2 == 0:
+        win += 1
+
+    pad = win // 2
+    xpad = np.pad(x, (pad, pad), mode="reflect")
     k = np.ones(win, dtype=float) / float(win)
-    return np.convolve(x, k, mode="same")
+    y = np.convolve(xpad, k, mode="valid")  # length == len(x) for odd win
+    return y
 
 
 # -----------------------------
@@ -110,6 +126,9 @@ def am_demodulate_envelope(
     # light smoothing helps the envelope look stable at high carrier frequencies
     win = max(1, int(round(fs / max(1.0, fc) * 0.25)))
     env_est = _moving_average(env_est, win)
+    if env_est.size >= 2:
+        env_est[0] = env_est[1]
+        env_est[-1] = env_est[-2]
 
     ka = float(ka)
     if ka == 0.0:
@@ -165,6 +184,20 @@ def fm_demodulate_instfreq(
     # mild smoothing (derivative amplifies noise)
     win = max(1, int(round(fs / max(1.0, fc) * 0.10)))
     inst_freq = _moving_average(inst_freq, win)
+
+    # stabilize edges (derivative + unwrap can still spike near boundaries)
+    if inst_freq.size >= 2:
+        inst_freq[0] = inst_freq[1]
+        inst_freq[-1] = inst_freq[-2]
+
+    # NEW: clamp a small guard region at both ends to kill residual boundary spikes
+    if inst_freq.size >= 10:
+        guard = max(2, int(round(0.005 * fs)))  # ~0.5% of a second worth of samples (e.g., 50 at fs=10k)
+        guard = min(guard, inst_freq.size // 4)  # keep it reasonable
+
+        inst_freq[:guard] = inst_freq[guard]
+        inst_freq[-guard:] = inst_freq[-guard - 1]
+
 
     kf = float(kf)
     if kf == 0.0:
