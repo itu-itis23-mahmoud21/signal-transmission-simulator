@@ -1628,7 +1628,7 @@ elif mode == "Analog → Digital":
         if technique == "PCM":
             pcm_nbits = st.select_slider("PCM bits per sample", options=[2, 3, 4, 5, 6], value=4, key="a2d_pcm_nbits")
         else:
-            dm_delta = st.slider("DM step size Δ", 0.01, 1.0, 0.1, step=0.01)
+            dm_delta = st.slider("DM step size Δ", 0.01, 1.0, 0.1, step=0.01, key="a2d_dm_delta")
 
         st.subheader("Line coding for produced bitstream")
         linecode_scheme = st.selectbox("Line code", ["NRZ-L", "Manchester", "NRZI", "Bipolar-AMI"])
@@ -1749,16 +1749,19 @@ elif mode == "Analog → Digital":
 
             fig = go.Figure()
             fig.add_trace(go.Scatter(x=res.t, y=res.signals["m(t)"], mode="lines", name="m(t)"))
+            samples_label = "PAM samples" if technique == "PCM" else "DM input samples"
+            samples_title = "PAM sampling (message with sampled points)" if technique == "PCM" else "Sampling for DM (message with sampled points)"
+
             fig.add_trace(
                 go.Scatter(
                     x=t_s,
                     y=m_s,
                     mode="markers",
-                    name="PAM samples",
-                    marker=dict(color="#FF4B4B", size=8),  # Streamlit-like red; adjust if you want
+                    name=samples_label,
+                    marker=dict(color="#FF4B4B", size=8),
                 )
             )
-            fig.update_layout(title="PAM sampling (message with sampled points)", xaxis_title="Time (s)", yaxis_title="Amplitude")
+            fig.update_layout(title=samples_title, xaxis_title="Time (s)", yaxis_title="Amplitude")
             fig.update_layout(
                 legend=dict(
                     orientation="h",
@@ -1891,19 +1894,33 @@ elif mode == "Analog → Digital":
                         st.info("No PCM steps available.")
 
             else:
-                steps = res.meta.get("dm", {}).get("steps", [])
-                if isinstance(steps, list) and len(steps) > 0:
-                    st.subheader("DM steps (Comparator + ±Δ staircase)")
-                    render_events_table(steps, width=1000)
+                dm = res.meta.get("dm", {})
+                steps = dm.get("steps", [])
+                sampler = res.meta.get("sampler", {})
 
-                    dm = res.meta.get("dm", {})
-                    with st.expander("DM parameters", expanded=True):
-                        dict_to_pretty_table({
-                            "delta": dm.get("delta"),
-                            "est0": dm.get("est0"),
-                        }, width=700)
-                else:
-                    st.info("No DM steps available.")
+                def _fmt(x, spec: str) -> str:
+                    if x is None:
+                        return ""
+                    try:
+                        return format(float(x), spec)
+                    except Exception:
+                        return str(x)
+
+                dm_params_display = {
+                    "Δ (step size)": _fmt(dm.get("delta"), ".6g"),
+                    "Initial staircase estimate": _fmt(dm.get("est0"), ".3f"),
+                    "Sampling rate fs_samp (Hz)": _fmt(sampler.get("fs_samp"), ".3f"),
+                    "Sampling interval Ts (s)": _fmt(sampler.get("Ts"), ".6g"),
+                }
+
+                st.subheader("DM parameters")
+                dict_to_pretty_table(dm_params_display, width=700)
+
+                with st.expander("DM steps (Comparator → 1/0 → Staircase update ±Δ)", expanded=False):
+                    if isinstance(steps, list) and len(steps) > 0:
+                        render_events_table(steps, width=1000)
+                    else:
+                        st.info("No DM steps available.")
 
         with tab4:
             bits_tx = res.bits.get("bitstream", [])

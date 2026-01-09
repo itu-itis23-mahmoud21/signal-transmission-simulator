@@ -140,11 +140,17 @@ def pcm_reconstruct_from_idx(idx: np.ndarray, n_bits: int, vmin: float, vmax: fl
 # DM: encode and decode
 # -------------------------
 
-def dm_encode(m_s: np.ndarray, delta: float, *, est0: float) -> Tuple[List[int], np.ndarray]:
+def dm_encode(m_s: np.ndarray, delta: float, *, est0: float) -> Tuple[List[int], np.ndarray, np.ndarray]:
     """
-    Delta modulation encoder:
-    b_k = 1 if m_s[k] >= est else 0
-    est <- est +/- delta
+    Delta modulation encoder (book-aligned):
+
+    At each sample k:
+      compare x[k] to current staircase estimate est[k]  (comparator)
+      output b[k] = 1 if x[k] >= est[k] else 0
+      update est[k+1] = est[k] ± delta  (move for the NEXT interval)
+
+    Returns:
+      bits, stair_before (est[k]), stair_after (est[k+1] after update stored per k)
     """
     delta = float(delta)
     if delta <= 0:
@@ -152,16 +158,17 @@ def dm_encode(m_s: np.ndarray, delta: float, *, est0: float) -> Tuple[List[int],
 
     est = float(est0)
     bits: List[int] = []
-    stair = np.zeros(len(m_s), dtype=float)
+    stair_before = np.zeros(len(m_s), dtype=float)
+    stair_after = np.zeros(len(m_s), dtype=float)
 
     for i, x in enumerate(m_s.tolist()):
+        stair_before[i] = est
         b = 1 if float(x) >= est else 0
         bits.append(b)
         est += delta if b == 1 else -delta
-        stair[i] = est
+        stair_after[i] = est
 
-    return bits, stair
-
+    return bits, stair_before, stair_after
 
 def dm_decode(bits: List[int], delta: float, *, est0: float) -> np.ndarray:
     delta = float(delta)
@@ -338,20 +345,34 @@ def simulate_a2d(
     else:
         delta = float(dm_delta)
 
-        # choose initial estimate: start at first sample (clean demo)
-        est0 = float(m_s[0]) if len(m_s) > 0 else 0.0
+        # Book-style default: start staircase at 0 (signals here are centered around 0)
+        est0 = 0.0
 
-        bitstream, stair_tx = dm_encode(m_s, delta=delta, est0=est0)
+        bitstream, stair_before, stair_after = dm_encode(m_s, delta=delta, est0=est0)
 
         line_tx, lc_enc_meta = line_encode(bitstream, linecode_scheme, lc_params)
         bitstream_rx, lc_dec_meta = line_decode(line_tx, linecode_scheme, lc_params)
 
-        stair_rx = dm_decode(bitstream_rx, delta=delta, est0=est0)
+        stair_rx_after = dm_decode(bitstream_rx, delta=delta, est0=est0)
 
-        # recon on display axis
-        recon_tx = _zoh_reconstruct(t, t_s[:len(stair_tx)], stair_tx)
-        t_s_rx = t_s[:len(stair_rx)] if len(stair_rx) <= len(t_s) else np.arange(len(stair_rx), dtype=float) * Ts
-        recon_rx = _zoh_reconstruct(t, t_s_rx, stair_rx)
+        # Build staircase sequences that include the INITIAL estimate at t=0
+        # so the first interval holds est0 (this matches the book’s staircase notion).
+        if len(t_s) > 0:
+            t_stair = np.concatenate([[t_s[0]], t_s])
+        else:
+            t_stair = np.array([0.0], dtype=float)
+
+        x_tx_stair = np.concatenate([[est0], stair_after])
+        x_rx_stair = np.concatenate([[est0], stair_rx_after])
+
+        # Align RX in case of any truncation/mismatch in bit count
+        n_rx = min(len(t_stair), len(x_rx_stair))
+        t_rx_stair = t_stair[:n_rx]
+        x_rx_stair = x_rx_stair[:n_rx]
+
+        # recon on display axis (ZOH)
+        recon_tx = _zoh_reconstruct(t, t_stair, x_tx_stair)
+        recon_rx = _zoh_reconstruct(t, t_rx_stair, x_rx_stair)
 
         signals.update({
             "linecode": line_tx,
@@ -362,28 +383,32 @@ def simulate_a2d(
         bits_out["bitstream"] = bitstream
         bits_out["decoded_bitstream"] = bitstream_rx
 
+        # Steps table (comparator + staircase update)
         steps = []
-        n_show = min(len(m_s), len(bitstream), len(stair_tx))
+        n_show = min(len(m_s), len(bitstream), len(stair_before), len(stair_after))
         for k in range(n_show):
             steps.append({
                 "k": k,
                 "t_s": float(t_s[k]),
-                "PAM sample": float(m_s[k]),
+                "Input sample x[k]": float(m_s[k]),
+                "Stair (before)": float(stair_before[k]),
                 "DM bit": int(bitstream[k]),
-                "Staircase": float(stair_tx[k]),
+                "Stair (after)": float(stair_after[k]),
             })
 
         meta["dm"] = {
             "delta": float(delta),
             "est0": float(est0),
-            "stair_tx": stair_tx,
             "steps": steps,
         }
+
         meta["dm_rx"] = {
-            "stair_rx": stair_rx,
+            "stair_rx_after": stair_rx_after,
         }
-        meta["stair_tx"] = {"t_s": t_s[:len(stair_tx)], "x": stair_tx}
-        meta["stair_rx"] = {"t_s": t_s_rx, "x": stair_rx}
+
+        # Use the staircase sequences (with initial point) for the plot
+        meta["stair_tx"] = {"t_s": t_stair, "x": x_tx_stair}
+        meta["stair_rx"] = {"t_s": t_rx_stair, "x": x_rx_stair}
 
         meta["linecode"] = {
             "scheme": linecode_scheme,
