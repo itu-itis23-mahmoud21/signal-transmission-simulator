@@ -1611,35 +1611,55 @@ elif mode == "Digital → Analog":
 elif mode == "Analog → Digital":
     with st.sidebar:
         st.subheader("Technique")
-        technique = st.selectbox("Digitization", ["PCM", "DM"])
+        technique = st.selectbox("Digitization Technique", ["PCM", "DM"])
 
         st.subheader("Message signal")
         kind = st.selectbox("Waveform", ["sine", "square", "triangle"])
-        Am = st.slider("Amplitude Am", 0.1, 5.0, 1.0, step=0.1)
-        fm = st.slider("Message frequency fm (Hz)", 1.0, 50.0, 5.0, step=1.0)
-        duration = st.slider("Duration (s)", 0.5, 5.0, 2.0, step=0.5)
+        Am = st.slider("Amplitude", 0.1, 5.0, 1.0, step=0.1, key="a2d_Am")
+        fm = st.slider("Message frequency fm (Hz)", 1.0, 50.0, 5.0, step=1.0, key="a2d_fm")
+        duration = st.slider("Duration (s)", 0.5, 5.0, 2.0, step=0.5, key="a2d_duration")
 
         st.subheader("Sampling (PAM)")
-        fs_mult = st.select_slider("Sampling multiplier (×fm)", options=[4, 8, 16, 32], value=8)
+        fs_mult = st.select_slider("Sampling multiplier (×fm)", options=[4, 8, 16, 32], value=8, key="a2d_fs_mult")
 
         st.subheader("Technique parameters")
         pcm_nbits = 4
         dm_delta = 0.1
         if technique == "PCM":
-            pcm_nbits = st.select_slider("PCM bits per sample", options=[2, 3, 4, 5, 6], value=4)
+            pcm_nbits = st.select_slider("PCM bits per sample", options=[2, 3, 4, 5, 6], value=4, key="a2d_pcm_nbits")
         else:
             dm_delta = st.slider("DM step size Δ", 0.01, 1.0, 0.1, step=0.01)
 
         st.subheader("Line coding for produced bitstream")
         linecode_scheme = st.selectbox("Line code", ["NRZ-L", "Manchester", "NRZI", "Bipolar-AMI"])
 
-        run = st.button("Run simulation", type="primary")
+        run = st.button("Run simulation", type="primary", key="a2d_run")
 
-    # Keep last result
+    # --- A2D run state (live like D2D/D2A) ---
+    current_sig = make_signature(
+        "a2d", params,
+        technique=technique,
+        kind=kind,
+        Am=float(Am),
+        fm=float(fm),
+        duration=float(duration),
+        fs_mult=int(fs_mult),
+        pcm_nbits=int(pcm_nbits),
+        dm_delta=float(dm_delta),
+        linecode_scheme=str(linecode_scheme),
+    )
+
     if "a2d_last" not in st.session_state:
         st.session_state["a2d_last"] = None
+    if "a2d_sig" not in st.session_state:
+        st.session_state["a2d_sig"] = None
 
-    if run:
+    prev_sig = st.session_state.get("a2d_sig", None)
+
+    live = True
+    should_run = bool(run) or (live and (prev_sig is not None) and (prev_sig != current_sig))
+
+    if should_run:
         res = simulate_a2d(
             kind, technique, params,
             Am=Am, fm=fm, duration=duration,
@@ -1649,6 +1669,7 @@ elif mode == "Analog → Digital":
             linecode_scheme=linecode_scheme,
         )
         st.session_state["a2d_last"] = res
+        st.session_state["a2d_sig"] = current_sig
 
     res = st.session_state.get("a2d_last", None)
     if res is None:
