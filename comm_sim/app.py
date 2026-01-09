@@ -1961,7 +1961,7 @@ elif mode == "Analog → Analog":
 
         st.subheader("Message signal")
         kind = st.selectbox("Waveform", ["sine", "square", "triangle"], key="a2a_kind")
-        Am = st.slider("Amplitude Am", 0.1, 5.0, 1.0, step=0.1, key="a2a_Am")
+        Am = st.slider("Amplitude", 0.1, 5.0, 1.0, step=0.1, key="a2a_Am")
         fm = st.slider("Message frequency fm (Hz)", 1.0, 50.0, 5.0, step=1.0, key="a2a_fm")
         duration = st.slider("Duration (s)", 0.5, 5.0, 2.0, step=0.5, key="a2a_duration")
 
@@ -2036,7 +2036,7 @@ elif mode == "Analog → Analog":
 
     res = st.session_state.get("a2a_last", None)
     if res is None:
-        st.info("Set parameters, then click **Run simulation**.")
+        empty_state()
         st.stop()
 
     # ---- Summary ----
@@ -2059,8 +2059,6 @@ elif mode == "Analog → Analog":
         xref="paper",
         yref="paper",
         bgcolor="rgba(0,0,0,0)",
-        itemsizing="constant",
-        itemwidth=70,
     )
 
     tab1, tab2, tab3 = st.tabs(["Waveforms", "Steps", "Details"])
