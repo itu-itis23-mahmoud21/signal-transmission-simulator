@@ -1626,7 +1626,7 @@ elif mode == "Analog → Digital":
         fm = st.slider("Message frequency fm (Hz)", 1.0, 50.0, 5.0, step=1.0, key="a2d_fm")
         duration = st.slider("Duration (s)", 0.5, 5.0, 2.0, step=0.5, key="a2d_duration")
 
-        st.subheader("Sampling (PAM)")
+        st.subheader("Sampling (PAM)" if technique == "PCM" else "Sampling (DM)")
         fs_mult = st.select_slider("Sampling multiplier (×fm)", options=[4, 8, 16, 32], value=8, key="a2d_fs_mult")
 
         st.subheader("Technique parameters")
