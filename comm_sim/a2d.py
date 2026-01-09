@@ -16,7 +16,8 @@ def gen_message(t: np.ndarray, kind: str, Am: float, fm: float) -> np.ndarray:
         return Am * np.sin(2 * np.pi * fm * t)
 
     if kind == "square":
-        return Am * np.sign(np.sin(2 * np.pi * fm * t))
+        s = np.sin(2 * np.pi * fm * t)
+        return Am * np.where(s >= 0.0, 1.0, -1.0)
 
     if kind == "triangle":
         # triangle via sawtooth-like formula

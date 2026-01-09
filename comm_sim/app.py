@@ -2238,16 +2238,16 @@ elif mode == "Analog → Analog":
         # Steps table
         steps = [
             {"Stage": "1) Message", "Description": "Generate analog message m(t) from chosen waveform (sine/square/triangle)."},
-            {"Stage": "2) Carrier", "Description": "Generate carrier c(t)=cos(2π f_c t)."},
+            {"Stage": "2) Carrier", "Description": "Generate carrier c(t)=sin(2π f_c t)."},
         ]
         if scheme == "AM":
-            steps.append({"Stage": "3) AM modulator", "Description": "Book (DSBTC): s(t) = A_c[1 + n_a x(t)]cos(2πf_ct), with x(t)=m(t)/max|m(t)|."})
+            steps.append({"Stage": "3) AM modulator", "Description": "Book (DSBTC): s(t) = A_c[1 + n_a x(t)]sin(2πf_ct), with x(t)=m(t)/max|m(t)|."})
             steps.append({"Stage": "4) (Ideal) AM demod", "Description": "Envelope estimate via analytic signal; x̂(t) ≈ (env/A_c − 1)/n_a, then m̂(t)=x̂·max|m(t)|."})
         elif scheme == "FM":
-            steps.append({"Stage": "3) FM modulator", "Description": "s(t)=A_c cos(2π f_c t + 2π k_f ∫ m(τ)dτ)."})
+            steps.append({"Stage": "3) FM modulator", "Description": "s(t)=A_c sin(2π f_c t + 2π k_f ∫ m(τ)dτ)."})
             steps.append({"Stage": "4) (Ideal) FM demod", "Description": "Instantaneous frequency from phase derivative; m̂(t) ≈ (f_i(t)−f_c)/k_f."})
         else:
-            steps.append({"Stage": "3) PM modulator", "Description": "s(t)=A_c cos(2π f_c t + k_p m(t))."})
+            steps.append({"Stage": "3) PM modulator", "Description": "s(t)=A_c sin(2π f_c t + k_p m(t))."})
             steps.append({"Stage": "4) (Ideal) PM demod", "Description": "Phase deviation from analytic phase; m̂(t) ≈ (φ(t)−2πf_ct)/k_p."})
 
         dfs = pd.DataFrame(steps)

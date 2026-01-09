@@ -125,9 +125,18 @@ def am_demodulate_envelope(
 
     win = max(1, int(round(fs / max(1.0, fc) * 1.0)))
     env_est = _moving_average(env_est, win)
+
+    # stabilize edges (Hilbert envelope has boundary transients, worse for square)
     if env_est.size >= 2:
         env_est[0] = env_est[1]
         env_est[-1] = env_est[-2]
+
+    # NEW: clamp a small guard region at both ends to kill residual spikes
+    if env_est.size >= 10:
+        guard = max(2, int(round(0.01 * fs)))      # ~10 ms
+        guard = min(guard, env_est.size // 4)      # keep reasonable
+        env_est[:guard] = env_est[guard]
+        env_est[-guard:] = env_est[-guard - 1]
 
     na = float(na)
     Ac = float(Ac)
@@ -138,6 +147,9 @@ def am_demodulate_envelope(
     # Ideal envelope: Ac * (1 + na*x(t))
     x_hat = (env_est / Ac - 1.0) / na
     m_hat = x_hat * float(m_peak)   # de-normalize back to original message amplitude
+    if m_hat.size >= 10:
+        m_hat[:guard] = m_hat[guard]
+        m_hat[-guard:] = m_hat[-guard - 1]
     return m_hat, env_est
 
 
