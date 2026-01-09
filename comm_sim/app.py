@@ -2020,7 +2020,7 @@ elif mode == "Analog → Analog":
         kf = 5.0
         kp = 1.0
         if scheme == "AM":
-            na = st.slider("n_a (modulation index)", 0.0, 1.5, 0.5, step=0.05, key="a2a_na")
+            na = st.slider("n_a (modulation index)", 0.05, 1.5, 0.5, step=0.05, key="a2a_na")
         elif scheme == "FM":
             kf = st.slider("kf (Hz per unit amplitude)", 0.1, 50.0, 5.0, step=0.1, key="a2a_kf")
         else:
@@ -2233,11 +2233,13 @@ elif mode == "Analog → Analog":
         if scheme == "AM":
             mu = float(res.meta.get("am", {}).get("modulation_index_mu", 0.0))
             if mu > 1.0:
-                st.warning(f"AM overmodulation detected (μ={mu:.2f} > 1). Envelope will cross zero and envelope detection distorts.")
+                st.warning(f"AM overmodulation detected (μ = {mu:.2f} > 1). Envelope will cross zero and envelope detection distorts.")
+            if na <= 0.10:
+                st.warning(f"Low modulation index (n_a = {na:.2f} ≤ 0.1) may lead to poor recovery due to low envelope SNR. As it makes envelope-based recovery numerically sensitive; tiny residual edge effects can be amplified.")
 
         # Steps table
         steps = [
-            {"Stage": "1) Message", "Description": "Generate analog message m(t) from chosen waveform (sine/square/triangle)."},
+            {"Stage": "1) Message", "Description": "Generate analog message m(t) from chosen waveform (sine/triangle)."},
             {"Stage": "2) Carrier", "Description": "Generate carrier c(t)=sin(2π f_c t)."},
         ]
         if scheme == "AM":
@@ -2324,17 +2326,35 @@ elif mode == "Analog → Analog":
         m0 = m0[:n]
         mr = mr[:n]
 
-        err = mr - m0
+        # --- Robust comparison for AM (tiny n_a amplifies tiny envelope/Hilbert residuals) ---
+        guard = 0
+        if scheme == "AM":
+            # trim a small region at both ends (edge effects)
+            guard = max(2, int(round(0.01 * float(fs_a))))  # e.g., 100 samples at fs=10k
+            guard = min(guard, n // 4)  # keep it safe
+
+        if guard > 0 and (n - 2 * guard) >= 10:
+            m0c = m0[guard : n - guard]
+            mrc = mr[guard : n - guard]
+        else:
+            m0c = m0
+            mrc = mr
+
+        # Remove DC bias before scoring (helps especially for small n_a)
+        m0c = m0c - float(np.mean(m0c))
+        mrc = mrc - float(np.mean(mrc))
+
+        err = mrc - m0c
         mse = float(np.mean(err ** 2))
         rmse = float(np.sqrt(mse))
-        peak = float(np.max(np.abs(m0))) if np.max(np.abs(m0)) > 0 else 1.0
+        peak = float(np.max(np.abs(m0c))) if np.max(np.abs(m0c)) > 0 else 1.0
         nrmse = float(rmse / peak)
 
         # correlation (guard against constant signals)
-        if np.std(m0) < 1e-12 or np.std(mr) < 1e-12:
+        if np.std(m0c) < 1e-12 or np.std(mrc) < 1e-12:
             corr = float("nan")
         else:
-            corr = float(np.corrcoef(m0, mr)[0, 1])
+            corr = float(np.corrcoef(m0c, mrc)[0, 1])
 
         # practical match rule for visualization correctness
         match = (nrmse < 0.05) and (np.isfinite(corr) and corr > 0.99)
@@ -2346,7 +2366,8 @@ elif mode == "Analog → Analog":
             st.error("MISMATCH (recovered deviates from original)")
 
         metrics = {
-            "Samples compared": n,
+            "Samples compared": int(m0c.size),
+            "Edge guard (samples each side)": int(guard),
             "RMSE": rmse,
             "NRMSE (RMSE / peak|m|)": nrmse,
             "Correlation": corr,
