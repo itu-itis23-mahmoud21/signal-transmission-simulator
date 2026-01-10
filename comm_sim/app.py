@@ -415,6 +415,237 @@ def render_events_table(events: list, *, width: int = 850):
         width=width,
     )
 
+def render_d2d_theory(*, params: SimParams, line_amp: float, show_grid: bool):
+    """
+    Theory tab for Digital → Digital.
+    Beginner-friendly + aligned with Stallings Ch.5.1 and our d2d.py implementation.
+    No interactive widgets here; it just explains and visualizes.
+    """
+    st.markdown("## Digital data → Digital signals (Line coding)")
+
+    st.markdown(
+        """
+A **digital signal** is a sequence of discrete voltage levels (pulses).  
+Line coding is the **mapping** from input bits → signal elements (voltage levels).  
+In this simulator, each bit occupies **Tb** seconds, and we sample it with **Ns** samples per bit:
+- **Tb** = bit duration (s)
+- **Ns** = samples per bit
+- **fs = Ns / Tb** = sampling frequency (Hz)
+
+At the receiver, decoding is done by sampling each bit interval (typically near the middle) and applying the rule of the scheme.
+        """
+    )
+
+    # --- Quick “book vs our code” mapping table (Stallings Table 5.2) ---
+    st.markdown("### Encoding formats (book definition → our implementation)")
+
+    rows = [
+        {
+            "Scheme": "NRZ-L",
+            "Book rule (Table 5.2)": "0 = high, 1 = low",
+            "Our encoder": "_nrzl_levels(bits): 0→+1, 1→−1",
+            "Our decoder": "mid-sample sign: +→0, −→1",
+        },
+        {
+            "Scheme": "NRZI",
+            "Book rule (Table 5.2)": "1 = transition at beginning, 0 = no transition",
+            "Our encoder": "_nrzi_levels(bits, start_level): if bit=1 flip level",
+            "Our decoder": "compare level to previous (nrzi_start_level)",
+        },
+        {
+            "Scheme": "Bipolar-AMI",
+            "Book rule (Table 5.2)": "0 = no line signal, 1 alternates +/−",
+            "Our encoder": "_ami_levels(bits, last_pulse_init): 1 toggles polarity",
+            "Our decoder": "nonzero→1, zero→0",
+        },
+        {
+            "Scheme": "Pseudoternary",
+            "Book rule (Table 5.2)": "1 = no line signal, 0 alternates +/−",
+            "Our encoder": "_pseudoternary_levels(bits, last_zero_pulse_init): 0 toggles polarity",
+            "Our decoder": "nonzero→0, zero→1",
+        },
+        {
+            "Scheme": "Manchester",
+            "Book rule (Table 5.2)": "mid-bit transition; 1: low→high, 0: high→low",
+            "Our encoder": "_manchester_samples(bits, Ns): 1=[−,+], 0=[+,−]",
+            "Our decoder": "compare first-half mean vs second-half mean",
+        },
+        {
+            "Scheme": "Differential Manchester",
+            "Book rule (Table 5.2)": "mid-bit transition always; 0 has start transition, 1 no start transition",
+            "Our encoder": "_diff_manchester_samples(bits, Ns, start_level)",
+            "Our decoder": "detect start transition vs previous end level",
+        },
+        {
+            "Scheme": "B8ZS (scrambling on AMI)",
+            "Book rule (Table 5.2)": "AMI but 8 zeros replaced using violations",
+            "Our encoder": "_b8zs_scramble_ami(bits, last_pulse_init)",
+            "Our decoder": "_descramble_b8zs(tern, last_pulse_init)",
+        },
+        {
+            "Scheme": "HDB3 (scrambling on AMI)",
+            "Book rule (Table 5.2)": "AMI but 4 zeros replaced using violations, rule depends on parity since last violation",
+            "Our encoder": "_hdb3_scramble_ami(bits, last_pulse_init, nonzero_since_violation_init)",
+            "Our decoder": "_descramble_hdb3(tern, last_nonzero_init=last_pulse_init)",
+        },
+    ]
+
+    st.dataframe(
+        pd.DataFrame(rows),
+        hide_index=True,
+        width="stretch",
+        column_config={
+            "Scheme": st.column_config.TextColumn("Scheme", width="small"),
+            "Book rule (Table 5.2)": st.column_config.TextColumn("Book rule", width="large"),
+            "Our encoder": st.column_config.TextColumn("Our encoder (d2d.py)", width="large"),
+            "Our decoder": st.column_config.TextColumn("Our decoder (d2d.py)", width="large"),
+        },
+    )
+
+    st.markdown("---")
+    st.markdown("## Big picture: what each family is trying to solve")
+
+    st.markdown(
+        """
+When comparing line codes, Stallings emphasizes a few practical goals:
+
+- **Clocking (synchronization):** Do we get enough transitions to recover timing?
+- **DC component:** Is there a nonzero average voltage (bad for transformer coupling)?
+- **Bandwidth:** More transitions → typically more high-frequency energy.
+- **Error detection:** Some formats allow spotting “impossible” patterns.
+
+Below is a beginner-friendly tour of the schemes, grouped as in the book.
+        """
+    )
+
+    # --- NRZ family ---
+    st.markdown("### 1) NRZ family: simplest voltage mapping (NRZ-L, NRZI)")
+
+    st.markdown(
+        """
+**NRZ-L**  
+- Bit is represented directly as a constant level for the whole bit interval.  
+- In the book convention used here: **0 → +A**, **1 → −A**.
+
+**NRZI (differential encoding)**  
+- The bit is represented by **change** vs **no change** at the beginning of each bit:
+  - **1 → transition**
+  - **0 → no transition**
+- Differential encoding is robust to polarity inversion (swapped wires), because decoding depends on transitions, not absolute levels.
+        """
+    )
+
+    # --- Multilevel binary ---
+    st.markdown("### 2) Multilevel binary: reduce DC and help clocking (AMI, Pseudoternary)")
+
+    st.markdown(
+        """
+**Bipolar-AMI**  
+- **0 → 0V**, **1 → ±A alternating**  
+- Benefits:
+  - No DC component (alternating +/− cancels out)
+  - Long runs of **1s** produce transitions (good clocking)
+- Weakness: long runs of **0s** become flat (clocking problem)
+
+**Pseudoternary** is the “mirror”:  
+- **1 → 0V**, **0 → ±A alternating**  
+- Same pros/cons, just swapped which bit causes pulses.
+        """
+    )
+
+    # --- Biphase ---
+    st.markdown("### 3) Biphase: self-clocking (Manchester, Differential Manchester)")
+
+    st.markdown(
+        """
+**Manchester**  
+- Always has a **mid-bit transition**, which makes it **self-clocking**.  
+- Data is encoded by the direction of that mid-bit transition:
+  - **1: low → high**
+  - **0: high → low**
+
+**Differential Manchester**  
+- Still always has a **mid-bit transition** (clocking).
+- Data is encoded by whether there is a transition at the **start** of the bit:
+  - **0 → start transition**
+  - **1 → no start transition**
+- Also differential (more robust to polarity inversion).
+        """
+    )
+
+    # --- Scrambling ---
+    st.markdown("### 4) Scrambling for long-distance: B8ZS and HDB3")
+
+    st.markdown(
+        """
+Biphase is great for clocking, but it increases the signaling activity (more transitions).  
+For long-distance links, the book describes **scrambling** on top of AMI: keep the same bit rate, but avoid long runs of zero line-signal by inserting **special violation patterns** that the receiver can recognize and replace back with zeros.
+
+**B8ZS** (North America): detects **8 consecutive zeros** and replaces them with a pattern containing **two violations**.
+
+**HDB3** (Europe/Japan): detects **4 consecutive zeros** and replaces them with a pattern containing **one violation**, but also carefully controls polarity to avoid DC buildup. The rule depends on whether the number of nonzero pulses since the last substitution is **odd or even**.
+        """
+    )
+
+    st.markdown("---")
+    st.markdown("## What our implementation does")
+
+    st.markdown(
+        """
+### Encoder output amplitude in the simulator
+Internally, `Digital to Digital mode` generates levels in **{−1, 0, +1}**.  
+In the UI, you scale it by **Line amplitude (±A)**, so the plotted waveform becomes **{−A, 0, +A}**.
+
+### Decoding strategy in our code
+- For most schemes, decoding samples the **middle of each bit** and maps sign/zero back to a bit.
+- For Manchester & Differential Manchester, decoding compares **first half vs second half** of each bit interval.
+- For B8ZS/HDB3, decoding first converts the waveform back to ternary symbols (−1/0/+1), then runs a pattern recognizer (descrambler) to restore the original zeros.
+        """
+    )
+
+    st.markdown("---")
+    st.markdown("## Visual example: same input bits encoded with each scheme")
+
+    # Use a canonical example from the book (Example 5.1 uses 01001100011)
+    example_bits = [0, 1, 0, 0, 1, 1, 0, 0, 0, 1, 1]
+    st.caption("Using the common textbook example bit sequence: 01001100011")
+
+    # Use the current params, but keep start-state defaults consistent with your UI defaults
+    # (these match common defaults in your sidebar: NRZI start=-1, DiffMan start=+1, AMI last=-1, Pseudo last0=-1, HDB3 parity=0)
+    demos = [
+        ("NRZ-L", dict()),
+        ("NRZI", dict(nrzi_start_level=-1)),
+        ("Manchester", dict()),
+        ("Differential Manchester", dict(diff_start_level=+1.0)),
+        ("Bipolar-AMI", dict(last_pulse_init=-1)),
+        ("Pseudoternary", dict(last_zero_pulse_init=-1)),
+        ("B8ZS", dict(last_pulse_init=-1)),
+        ("HDB3", dict(last_pulse_init=-1, hdb3_nonzero_since_violation_init=0)),
+    ]
+
+    cols = st.columns(2)
+    for i, (scheme_name, kw) in enumerate(demos):
+        r = simulate_d2d(example_bits, scheme_name, params, **kw)
+        tx = r.signals["tx"] * float(line_amp)
+        with cols[i % 2]:
+            st.plotly_chart(
+                plot_signal(r.t, tx, f"{scheme_name}", grid=show_grid, x_dtick=params.Tb, y_dtick=1),
+                width="stretch",
+            )
+
+    st.markdown("---")
+    st.markdown("## Key takeaways")
+
+    st.markdown(
+        """
+- If you want **simplicity + bandwidth efficiency**, NRZ codes are attractive, but clock recovery can fail on long constant runs.
+- If you want **no DC + some clock help**, AMI/Pseudoternary help—but you must handle long runs of the “zero line-signal” symbol.
+- If you want **self-clocking**, Manchester-family codes solve timing nicely but increase transitions (more bandwidth).
+- If you want **high-rate long-distance with AMI**, scrambling (B8ZS/HDB3) preserves bit rate while preventing long “flat” sections.
+        """
+    )
+
+
 def empty_state(message: str = "Choose a scheme, optionally generate bits, then click **Run simulation**."):
     # Centered, friendly placeholder
     st.markdown(
@@ -681,9 +912,9 @@ if mode == "Digital → Digital":
     else:
         summary_block({**res.meta, "fs": params.fs, "Tb": params.Tb, "samples_per_bit": params.samples_per_bit})
 
-        tab1, tab3, tab4 = st.tabs(["Waveforms", "Steps", "Details"])
+        tab_wave, tab_steps, tab_details, tab_theory = st.tabs(["Waveforms", "Steps", "Details", "Theory"])
 
-        with tab1:
+        with tab_wave:
             tx_scaled = res.signals["tx"] * line_amp
             t_to_plot = res.t
             tx_to_plot = tx_scaled
@@ -817,7 +1048,7 @@ if mode == "Digital → Digital":
                             width="stretch",
                         )
 
-        with tab3:
+        with tab_steps:
             def _scale_meta_for_display(meta_obj: dict, amp: float) -> dict:
                 # Make a deep-ish copy and scale any ternary patterns (+/-1/0) to +/-amp/0 for display
                 if not isinstance(meta_obj, dict):
@@ -890,7 +1121,7 @@ if mode == "Digital → Digital":
                 with st.expander("Decoder descramble hits", expanded=True):
                     render_events_table(dec_hits, width=1000)
 
-        with tab4:
+        with tab_details:
             st.write("Input bits:")
             st.code(bits_to_string(res.bits["input"]))
             st.write("Decoded bits:")
@@ -900,6 +1131,10 @@ if mode == "Digital → Digital":
                 st.success("MATCH")
             else:
                 st.error("MISMATCH")
+
+        with tab_theory:
+            render_d2d_theory(params=params, line_amp=line_amp, show_grid=show_grid)
+
 
 elif mode == "Digital → Analog":
     with st.sidebar:
