@@ -59,7 +59,8 @@
 # ----------
 #   pytest -q comm_sim/tests/test_d2d.py
 
-
+import os
+import sys
 import random
 from typing import Dict, List
 
@@ -67,7 +68,45 @@ import numpy as np
 import pytest
 
 from utils import SimParams
-from d2d import simulate_d2d
+
+
+# ==========================================
+# Dynamic Import Logic (Environment Switch)
+# ==========================================
+# Read environment variable 'TEST_TARGET' (defaults to 'original' if not set)
+test_target = os.getenv("TEST_TARGET", "original")
+
+if test_target == "optimized":
+    # 1. Resolve path relative to THIS test file (comm_sim/tests/test_d2d.py)
+    #    We want to go up one level (..), then into 'gemini_optimized'
+    current_test_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(current_test_dir)  # This is 'comm_sim'
+    optimized_folder = os.path.join(project_root, "gemini_optimized")
+
+    print(f"\n>>> TARGET MODE: Optimized <<<")
+
+    # 2. Add to system path to allow direct import
+    if optimized_folder not in sys.path:
+        sys.path.insert(0, optimized_folder)
+
+    # 3. Import with fallback for the typo in the filename
+    try:
+        # Try the correct spelling first
+        from d2d_gemini_optimized import simulate_d2d
+    except ImportError:
+        try:
+            # Fallback: The file in your upload has a typo ("optmizied")
+            from d2d_gemini_optmizied import simulate_d2d
+            print(">>> NOTE: Imported 'd2d_gemini_optmizied.py' (detected filename typo on disk)")
+        except ImportError as e:
+            sys.exit(f"CRITICAL ERROR: Could not import optimized file.\nChecked path: {optimized_folder}\nError: {e}")
+
+else:
+    print("\n>>> TARGET MODE: Original (d2d.py) <<<\n")
+    try:
+        from d2d import simulate_d2d
+    except ImportError:
+         sys.exit("CRITICAL ERROR: Could not import 'd2d.py'. Ensure 'comm_sim' is in your Python path or pytest.ini.")
 
 
 # =========================
