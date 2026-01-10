@@ -7,7 +7,7 @@ import pandas as pd
 from pathlib import Path
 import base64
 
-from utils import SimParams, bits_from_string, bits_to_string, gen_random_bits, bits_to_step
+from utils import SimParams, SimResult, bits_from_string, bits_to_string, gen_random_bits, bits_to_step
 from d2d import simulate_d2d
 from d2a import simulate_d2a
 from a2d import simulate_a2d
@@ -1477,6 +1477,425 @@ After PCM/DM produces bits, we transmit them as a digital waveform using **{line
         """
 > Note: This “line coding” stage is exactly the same family of schemes we have in **Digital → Digital**.
 We reuse it here because Stallings explicitly notes that once you have digital data, you can transmit it with a line code.  
+        """
+    )
+
+def render_a2a_theory(
+    *,
+    params: SimParams,
+    show_grid: bool,
+    scheme_selected: str,
+    kind_selected: str,
+    Am: float,
+    fm: float,
+    duration: float,
+    na: float,
+    nf: float,
+    np_: float,
+    res: SimResult,
+) -> None:
+    """Render the beginner-friendly Theory tab for Analog → Analog (A2A)."""
+
+    fs = float(params.fs)
+    fc = float(params.fc)
+    Ac = float(params.Ac)
+
+    scheme = str(scheme_selected).upper()
+    kind = str(kind_selected).lower()
+
+    t = np.asarray(res.t, dtype=float)
+    m = np.asarray(res.signals.get("m(t)", []), dtype=float)
+    s = np.asarray(res.signals.get("tx", []), dtype=float)
+
+    st.markdown(
+        r"""
+## Analog → Analog (AM / FM / PM): what’s happening?
+
+We start with an **analog message** \(m(t)\) (voice-like baseband), and shift it to a **higher-frequency carrier** around \(f_c\).
+This is useful for:
+- **Practical transmission at high frequency** (especially wireless antennas)
+- **Frequency-division multiplexing (FDM)**
+
+In this simulator, we implement the Chapter 16.1 “book forms”, and we also show a clean “ideal-demod” view (envelope / phase / inst. frequency) so you can *see* what the modulation did.
+        """
+    )
+
+    # ------------------------------------------------------------------
+    # Book ↔ our code mapping
+    # ------------------------------------------------------------------
+    st.markdown("### Book definitions → how our code implements them")
+
+    rows = []
+
+    if scheme == "AM":
+        am_meta = res.meta.get("am", {})
+        mu = float(am_meta.get("modulation_index_mu", abs(float(na))))
+
+        rows.append(
+            {
+                "Item": "AM (DSB transmitted carrier)",
+                "Book idea": r"$s(t)=A_c[1+n_a x(t)]\cos(2\pi f_c t)$, with $|x(t)|\le 1$",
+                "Our TX": r"`am_modulate`:  $s(t)=A_c[1+n_a x(t)]\sin(2\pi f_c t)$",
+                "Notes": r"We normalize $x(t)=m(t)/\max|m(t)|$, so the book modulation index is $\mu=|n_a|$.",
+            }
+        )
+        rows.append(
+            {
+                "Item": "Envelope (why it works)",
+                "Book idea": r"Envelope = $A_c[1+n_a x(t)]$ if $\mu\le 1$ (no zero-crossing)",
+                "Our RX": r"`am_demodulate_envelope`: Hilbert envelope, then $x̂=(env/A_c-1)/n_a$, then rescale to $m̂$",
+                "Notes": "If μ>1, envelope crosses 0 → envelope detection distorts (overmodulation).",
+            }
+        )
+
+        derived_rows = {
+            "Scheme": "AM",
+            "fs (Hz)": fs,
+            "fc (Hz)": fc,
+            "Ac": Ac,
+            "Message": f"{kind}, Am={Am:.3g}, fm={fm:.3g} Hz",
+            "Book μ = |n_a|": mu,
+            "Overmodulated?": bool(mu > 1.0),
+            "AM bandwidth hint (single-tone)": float(am_meta.get("bandwidth_hint_hz", 2.0 * float(fm))),
+        }
+
+    elif scheme == "FM":
+        fm_meta = res.meta.get("fm", {})
+        delta_f = float(fm_meta.get("delta_f_max_hz", np.nan))
+        beta = float(fm_meta.get("beta_index", np.nan))
+        bw = float(fm_meta.get("bw_carson_hz", np.nan))
+
+        rows.append(
+            {
+                "Item": "Angle modulation (general)",
+                "Book idea": r"$s(t)=A_c\cos(2\pi f_c t+\phi(t))$",
+                "Our TX": "We implement the same idea, using `sin(...)` instead of `cos(...)` (just a phase shift).",
+                "Notes": "AM changes amplitude; FM/PM keep amplitude ≈ constant and change angle.",
+            }
+        )
+        rows.append(
+            {
+                "Item": "FM definition",
+                "Book idea": r"$\phi'(t)=n_f m(t)\ \Rightarrow\ \phi(t)=\int n_f m(\tau)\,d\tau$",
+                "Our TX": r"`fm_modulate`: $\phi(t)\approx \mathrm{cumsum}(m)\cdot n_f/f_s$",
+                "Notes": r"Peak deviation: $\Delta F=\frac{n_f A_m}{2\pi}$; FM index $\beta=\Delta F/f_m$.",
+            }
+        )
+        rows.append(
+            {
+                "Item": "FM demod (visual)",
+                "Book idea": r"Instantaneous frequency $f_i(t)=\frac{1}{2\pi}\frac{d}{dt}(\text{phase})$",
+                "Our RX": r"`fm_demodulate_instfreq`: Hilbert→unwrap phase→gradient→$f_i(t)$→$m̂(t)=\frac{2\pi}{n_f}(f_i-f_c)$",
+                "Notes": "We apply reflect-padding + light smoothing to avoid edge spikes in the displayed window.",
+            }
+        )
+
+        derived_rows = {
+            "Scheme": "FM",
+            "fs (Hz)": fs,
+            "fc (Hz)": fc,
+            "Ac": Ac,
+            "Message": f"{kind}, Am={Am:.3g}, fm={fm:.3g} Hz",
+            "n_f (rad/s per unit)": float(fm_meta.get("nf_rad_per_s_per_unit", nf)),
+            "ΔF max (Hz)": delta_f,
+            "β = ΔF/fm": beta,
+            "Carson BW ≈ 2(ΔF+fm) (Hz)": bw,
+        }
+
+    else:  # PM
+        pm_meta = res.meta.get("pm", {})
+        dphi = float(pm_meta.get("delta_phi_max_rad", np.nan))
+        df = float(pm_meta.get("delta_f_max_hz_sine_approx", np.nan))
+        bw = float(pm_meta.get("bw_carson_hz_sine_approx", np.nan))
+
+        rows.append(
+            {
+                "Item": "Angle modulation (general)",
+                "Book idea": r"$s(t)=A_c\cos(2\pi f_c t+\phi(t))$",
+                "Our TX": "We implement the same idea, using `sin(...)` instead of `cos(...)` (just a phase shift).",
+                "Notes": "AM changes amplitude; FM/PM keep amplitude ≈ constant and change angle.",
+            }
+        )
+        rows.append(
+            {
+                "Item": "PM definition",
+                "Book idea": r"$\phi(t)=n_p m(t)$",
+                "Our TX": r"`pm_modulate`: $s(t)=A_c\sin(2\pi f_c t+n_p m(t))$",
+                "Notes": r"Peak phase deviation: $\Delta\phi_{\max}=n_p A_m$.",
+            }
+        )
+        rows.append(
+            {
+                "Item": "PM demod (visual)",
+                "Book idea": r"Extract phase deviation: $\phi_{\text{dev}}(t)=\text{phase}-2\pi f_c t$",
+                "Our RX": r"`pm_demodulate_phase`: Hilbert→unwrap phase→subtract carrier phase→$m̂(t)=\phi_{\text{dev}}/n_p$",
+                "Notes": "We remove residual DC bias in phase deviation for a clean overlay plot.",
+            }
+        )
+
+        derived_rows = {
+            "Scheme": "PM",
+            "fs (Hz)": fs,
+            "fc (Hz)": fc,
+            "Ac": Ac,
+            "Message": f"{kind}, Am={Am:.3g}, fm={fm:.3g} Hz",
+            "n_p (rad per unit)": float(pm_meta.get("np_rad_per_unit", np_)),
+            "Δφ max (rad)": dphi,
+            "ΔF max (Hz, single-tone approx)": df,
+            "Carson BW ≈ 2(ΔF+fm) (Hz)": bw,
+        }
+
+    df_map = pd.DataFrame(rows)
+    st.dataframe(
+        df_map,
+        hide_index=True,
+        width=1100,
+        column_config={
+            "Item": st.column_config.TextColumn("Item", width="medium"),
+            "Book idea": st.column_config.TextColumn("Book idea", width="large"),
+            "Our TX": st.column_config.TextColumn("Our TX", width="large"),
+            "Notes": st.column_config.TextColumn("Notes", width="large"),
+        },
+    )
+
+    st.markdown("### Key parameters (current settings)")
+    dict_to_pretty_table(
+        derived_rows,
+        width=900,
+        default_float_fmt=".6g",
+        float_formats={
+            "fs (Hz)": ".0f",
+            "fc (Hz)": ".2f",
+            "Ac": ".3f",
+            "AM bandwidth hint (single-tone)": ".0f",
+            "ΔF max (Hz)": ".3f",
+            "β = ΔF/fm": ".4f",
+            "Carson BW ≈ 2(ΔF+fm) (Hz)": ".0f",
+            "Δφ max (rad)": ".4f",
+            "ΔF max (Hz, single-tone approx)": ".3f",
+        },
+    )
+
+    # ------------------------------------------------------------------
+    # Visuals: book-like intuition (time + spectrum)
+    # ------------------------------------------------------------------
+    st.markdown("### Visual intuition (time domain)")
+
+    if t.size == 0 or m.size == 0 or s.size == 0:
+        st.info("No samples available to visualize.")
+        return
+
+    # A “nice-looking” zoom window (a few carrier cycles), without changing the actual simulation.
+    zoom_seconds = min(float(duration), max(2.0 / float(fm), 10.0 / float(fc)))
+    zoom_seconds = max(0.05, zoom_seconds)
+    idx = (t >= 0.0) & (t <= zoom_seconds)
+
+    common_margin = dict(t=80, r=20, l=20, b=40)
+    legend_above = dict(
+        orientation="h",
+        x=1.0,
+        y=1.12,
+        xanchor="right",
+        yanchor="bottom",
+        xref="paper",
+        yref="paper",
+        bgcolor="rgba(0,0,0,0)",
+    )
+
+    # Message
+    fig_m = go.Figure()
+    fig_m.add_trace(go.Scatter(x=t[idx], y=m[idx], mode="lines", name="m(t)"))
+    fig_m.update_layout(
+        title=f"Message m(t) (zoom: 0 → {zoom_seconds:.3g}s)",
+        xaxis_title="Time (s)",
+        yaxis_title="Amplitude",
+        showlegend=False,
+        margin=common_margin,
+    )
+    if show_grid:
+        fig_m.update_xaxes(showgrid=True)
+        fig_m.update_yaxes(showgrid=True)
+    st.plotly_chart(fig_m, width="stretch")
+
+    # Modulated + any “book helper curve”
+    fig_s = go.Figure()
+    fig_s.add_trace(go.Scatter(x=t[idx], y=s[idx], mode="lines", name="s(t) (TX)"))
+
+    if scheme == "AM":
+        env_th = res.signals.get("envelope_theory", None)
+        env_est = res.signals.get("envelope_est", None)
+
+        if env_th is not None:
+            env_th = np.asarray(env_th, dtype=float)
+            fig_s.add_trace(
+                go.Scatter(
+                    x=t[idx],
+                    y=env_th[idx],
+                    mode="lines",
+                    name="+Envelope (theory)",
+                    line=dict(dash="dash", width=2),
+                    opacity=0.9,
+                )
+            )
+            fig_s.add_trace(
+                go.Scatter(
+                    x=t[idx],
+                    y=-env_th[idx],
+                    mode="lines",
+                    name="-Envelope (theory)",
+                    line=dict(dash="dash", width=2),
+                    opacity=0.9,
+                )
+            )
+
+        if env_est is not None:
+            env_est = np.asarray(env_est, dtype=float)
+            fig_s.add_trace(
+                go.Scatter(
+                    x=t[idx],
+                    y=env_est[idx],
+                    mode="lines",
+                    name="Envelope (estimated)",
+                    line=dict(width=2),
+                    opacity=0.7,
+                )
+            )
+
+    elif scheme == "FM":
+        inst_f = res.signals.get("inst_freq", None)
+        if inst_f is not None:
+            inst_f = np.asarray(inst_f, dtype=float)
+            # Put the inst-freq as a second figure (cleaner than a second y-axis for beginners)
+            fig_f = go.Figure()
+            fig_f.add_trace(go.Scatter(x=t, y=inst_f, mode="lines", name="Instantaneous frequency"))
+            fig_f.add_trace(go.Scatter(x=[t[0], t[-1]], y=[fc, fc], mode="lines", name="fc (reference)", line=dict(dash="dash")))
+            fig_f.update_layout(
+                title="FM: instantaneous frequency fᵢ(t) (should swing around fc)",
+                xaxis_title="Time (s)",
+                yaxis_title="Hz",
+                legend=legend_above,
+                margin=common_margin,
+            )
+            if show_grid:
+                fig_f.update_xaxes(showgrid=True)
+                fig_f.update_yaxes(showgrid=True)
+            st.plotly_chart(fig_f, width="stretch")
+
+    else:  # PM
+        ph = res.signals.get("phase_dev", None)
+        if ph is not None:
+            ph = np.asarray(ph, dtype=float)
+            fig_p = go.Figure()
+            fig_p.add_trace(go.Scatter(x=t, y=ph, mode="lines", name="Phase deviation φ_dev(t)"))
+            fig_p.update_layout(
+                title="PM: extracted phase deviation φ_dev(t)",
+                xaxis_title="Time (s)",
+                yaxis_title="Radians",
+                legend=legend_above,
+                margin=common_margin,
+            )
+            if show_grid:
+                fig_p.update_xaxes(showgrid=True)
+                fig_p.update_yaxes(showgrid=True)
+            st.plotly_chart(fig_p, width="stretch")
+
+    fig_s.update_layout(
+        title=f"Modulated signal s(t) ({scheme}) (zoom: 0 → {zoom_seconds:.3g}s)",
+        xaxis_title="Time (s)",
+        yaxis_title="Amplitude",
+        legend=legend_above,
+        margin=common_margin,
+    )
+    if show_grid:
+        fig_s.update_xaxes(showgrid=True)
+        fig_s.update_yaxes(showgrid=True)
+    st.plotly_chart(fig_s, width="stretch")
+
+    # Recovered overlay (what your Waveforms tab shows, but explained)
+    mr = np.asarray(res.signals.get("recovered", []), dtype=float)
+    if mr.size == t.size and mr.size > 0:
+        fig_r = go.Figure()
+        fig_r.add_trace(
+            go.Scatter(
+                x=t,
+                y=mr,
+                mode="lines",
+                name="Recovered (ideal RX)",
+                line=dict(color="#ff4b4b", width=2),
+            )
+        )
+
+        fig_r.add_trace(go.Scatter(x=t, y=m, mode="lines", name="m(t) (original)", line=dict(dash="dash"), opacity=0.7))
+        fig_r.update_layout(
+            title="Recovered vs original (ideal-demod visualization)",
+            xaxis_title="Time (s)",
+            yaxis_title="Amplitude",
+            legend=legend_above,
+            margin=common_margin,
+        )
+        if show_grid:
+            fig_r.update_xaxes(showgrid=True)
+            fig_r.update_yaxes(showgrid=True)
+        st.plotly_chart(fig_r, width="stretch")
+
+    # ------------------------------------------------------------------
+    # Spectrum intuition (beginner-friendly, minimal math)
+    # ------------------------------------------------------------------
+    st.markdown("### Visual intuition (frequency domain / spectrum)")
+
+    def _rfft_mag(x: np.ndarray, fs_hz: float) -> tuple[np.ndarray, np.ndarray]:
+        x = np.asarray(x, dtype=float)
+        if x.size == 0:
+            return np.array([]), np.array([])
+        X = np.fft.rfft(x * np.hanning(x.size))
+        f = np.fft.rfftfreq(x.size, d=1.0 / float(fs_hz))
+        mag = np.abs(X)
+        mag = mag / (np.max(mag) + 1e-12)
+        return f, mag
+
+    fm_f, fm_mag = _rfft_mag(m, fs)
+    fs_f, fs_mag = _rfft_mag(s, fs)
+
+    # Show a band around fc for s(t), and baseband for m(t)
+    if fm_f.size > 0 and fs_f.size > 0:
+        fig_spec = go.Figure()
+
+        # message baseband (0..maybe 5*fm)
+        fmax_m = min(float(fs) / 2.0, max(10.0 * float(fm), 5.0 * float(fm)))
+        im = fm_f <= fmax_m
+        fig_spec.add_trace(go.Scatter(x=fm_f[im], y=fm_mag[im], mode="lines", name="|M(f)| (message, baseband)"))
+
+        # modulated band around fc (fc ± 5*fm, clipped)
+        span = 5.0 * float(fm)
+        f_lo = max(0.0, float(fc) - span)
+        f_hi = min(float(fs) / 2.0, float(fc) + span)
+        isel = (fs_f >= f_lo) & (fs_f <= f_hi)
+        fig_spec.add_trace(go.Scatter(x=fs_f[isel], y=fs_mag[isel], mode="lines", name="|S(f)| (modulated, near fc)"))
+
+        # Reference lines for fc and sideband edges (AM intuition)
+        fig_spec.add_trace(go.Scatter(x=[fc, fc], y=[0, 1], mode="lines", name="fc", line=dict(dash="dash")))
+        if scheme == "AM":
+            fig_spec.add_trace(go.Scatter(x=[fc - fm, fc - fm], y=[0, 1], mode="lines", name="fc−fm", line=dict(dash="dot")))
+            fig_spec.add_trace(go.Scatter(x=[fc + fm, fc + fm], y=[0, 1], mode="lines", name="fc+fm", line=dict(dash="dot")))
+
+        fig_spec.update_layout(
+            title="Spectrum intuition: baseband vs bandpass (normalized magnitudes)",
+            xaxis_title="Frequency (Hz)",
+            yaxis_title="Normalized magnitude",
+            legend=legend_above,
+            margin=common_margin,
+        )
+        if show_grid:
+            fig_spec.update_xaxes(showgrid=True)
+            fig_spec.update_yaxes(showgrid=True)
+        st.plotly_chart(fig_spec, width="stretch")
+
+    st.markdown(
+        r"""
+### Quick reading guide
+
+- **AM**: sidebands sit at \(f_c \pm\) (message frequencies). For a single tone at \(f_m\), you clearly see energy near \(f_c\pm f_m\).  
+- **FM/PM**: many sidebands can appear (nonlinear angle term). Carson’s rule gives a practical bandwidth estimate.
         """
     )
 
@@ -3295,9 +3714,9 @@ elif mode == "Analog → Analog":
         bgcolor="rgba(0,0,0,0)",
     )
 
-    tab1, tab2, tab3 = st.tabs(["Waveforms", "Steps", "Details"])
+    tab_wave, tab_steps, tab_details, tab_theory = st.tabs(["Waveforms", "Steps", "Details", "Theory"])
 
-    with tab1:
+    with tab_wave:
         # 1) Message
         figm = go.Figure()
         figm.add_trace(go.Scatter(x=res.t, y=res.signals["m(t)"], mode="lines", name="m(t)"))
@@ -3388,7 +3807,7 @@ elif mode == "Analog → Analog":
             figr.update_yaxes(showgrid=True)
         st.plotly_chart(figr, width="stretch")
 
-    with tab2:
+    with tab_steps:
         # Formatting helpers for compact, readable tables
         def _fmt(x: float, nd: int = 3) -> str:
             try:
@@ -3441,7 +3860,7 @@ elif mode == "Analog → Analog":
         with st.expander("Full metadata (debug)", expanded=False):
             st.json(res.meta)
 
-    with tab3:
+    with tab_details:
         m0 = np.asarray(res.signals.get("m(t)", []), dtype=float)
         mr = np.asarray(res.signals.get("recovered", []), dtype=float)
 
@@ -3495,3 +3914,18 @@ elif mode == "Analog → Analog":
             "Mean error": float(np.mean(err)),
         }
         dict_to_pretty_table(metrics, width=700, default_float_fmt=".6g")
+    
+    with tab_theory:
+        render_a2a_theory(
+            params=aparams,
+            show_grid=show_grid,
+            scheme_selected=scheme,
+            kind_selected=kind,
+            Am=float(Am),
+            fm=float(fm),
+            duration=float(duration),
+            na=float(na),
+            nf=float(nf),
+            np_=float(np_),
+            res=res,
+        )
