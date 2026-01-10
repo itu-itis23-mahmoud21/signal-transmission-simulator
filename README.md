@@ -1,4 +1,4 @@
-# Communication Signal Simulator
+# Encoding and Modulation Techniques Simulator
 
 Interactive Streamlit-based simulator for common techniques in computer communications:
 
