@@ -96,6 +96,18 @@ _16QAM_AXIS_INV: Dict[float, Tuple[int, int]] = {
 _2QAM_AXIS_MAP: Dict[int, float] = {0: -1.0, 1: +1.0}
 _2QAM_AXIS_INV: Dict[int, int] = {-1: 0, +1: 1}
 
+# ------------------------------------------------------------------
+# Public constants (for UI/Theory) to prevent drift with implementation
+# ------------------------------------------------------------------
+QPSK_MAP = dict(_QPSK_MAP)                # (b0,b1) -> (I,Q)
+QPSK_INV = dict(_QPSK_INV)                # (signI,signQ) -> (b0,b1)
+
+QAM16_AXIS_MAP = dict(_16QAM_AXIS_MAP)    # (b0,b1) -> level in {-3,-1,+1,+3}
+QAM16_AXIS_INV = dict(_16QAM_AXIS_INV)    # level -> (b0,b1)
+
+QAM2_AXIS_MAP = dict(_2QAM_AXIS_MAP)      # bit -> level in {-1,+1}
+QAM2_AXIS_INV = dict(_2QAM_AXIS_INV)      # level -> bit
+
 
 def _sign01(x: float) -> int:
     """Return +1 if x>=0 else -1."""

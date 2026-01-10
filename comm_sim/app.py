@@ -9,7 +9,7 @@ import base64
 
 from utils import SimParams, SimResult, bits_from_string, bits_to_string, gen_random_bits, bits_to_step
 from d2d import simulate_d2d
-from d2a import simulate_d2a
+from d2a import simulate_d2a, QPSK_MAP, QAM16_AXIS_MAP
 from a2d import simulate_a2d
 from a2a import simulate_a2a
 
@@ -887,11 +887,11 @@ In our simulator:
 
     with colA:
         st.markdown("### QPSK (our mapping)")
+        # Keep the same display order as the book/our labeling
+        qpsk_order = [(1, 1), (0, 1), (0, 0), (1, 0)]
         qpsk_points = [
-            ("11", +1, +1),
-            ("01", -1, +1),
-            ("00", -1, -1),
-            ("10", +1, -1),
+            ("".join(map(str, bpair)), QPSK_MAP[bpair][0], QPSK_MAP[bpair][1])
+            for bpair in qpsk_order
         ]
         fig = go.Figure()
         fig.add_trace(
@@ -915,7 +915,10 @@ In our simulator:
 
     with colB:
         st.markdown("### 16-QAM (Gray per axis)")
-        axis_map = {"00": -3, "01": -1, "11": +1, "10": +3}
+        axis_map = {
+            "".join(map(str, k)): int(v) if float(v).is_integer() else v
+            for k, v in QAM16_AXIS_MAP.items()
+        }
         pts = [(f"{ib}{qb}", I, Q) for ib, I in axis_map.items() for qb, Q in axis_map.items()]
         fig2 = go.Figure()
         fig2.add_trace(
