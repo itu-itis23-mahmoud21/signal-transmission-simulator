@@ -74,56 +74,77 @@ import pytest
 from utils import SimParams
 from a2d import gen_message
 
-
 # ==========================================
 # Dynamic Import Logic (Environment Switch)
 # ==========================================
+# Options: "gemini_optimized", "GPT_optimized", "original" (default)
 test_target = os.getenv("TEST_TARGET", "original")
 
-if test_target == "optimized":
-    # 1. Resolve path relative to THIS test file
-    current_test_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(current_test_dir)
-    optimized_folder = os.path.join(project_root, "gemini_optimized")
+# Helper: Resolve paths relative to THIS test file
+current_test_dir = os.path.dirname(os.path.abspath(__file__))     # .../comm_sim/tests
+project_root = os.path.dirname(current_test_dir)                  # .../comm_sim
 
-    print(f"\n>>> TARGET MODE: Optimized")
+if test_target == "gemini_optimized":
+    target_folder = os.path.join(project_root, "gemini_optimized")
+    print(f"\n>>> TARGET MODE: Gemini Optimized")
+    print(f">>> Looking for file in: {target_folder}\n")
 
-    # 2. Add to system path
-    if optimized_folder not in sys.path:
-        sys.path.insert(0, optimized_folder)
+    if target_folder not in sys.path:
+        sys.path.insert(0, target_folder)
 
-    # 3. Import from optimized file
     try:
-        # Import main simulation and constant
-        from a2a_gemini_optimized import PAD_CYCLES, simulate_a2a
-        
-        # Try importing modulation helpers. 
-        # Handle potential naming differences (modulate_am vs am_modulate)
+        # 1. Try correct filename
+        import a2a_gemini_optimized as sim_module
+    except ImportError:
         try:
-            from a2a_gemini_optimized import am_modulate, fm_modulate, pm_modulate
-        except ImportError:
-            # Fallback: Aliasing if the optimized file uses 'modulate_am' style
-            from a2a_gemini_optimized import (
-                modulate_am as am_modulate,
-                modulate_fm as fm_modulate,
-                modulate_pm as pm_modulate
-            )
-            
+            # 2. Fallback for the known filename typo
+            import a2a_gemini_optmizied as sim_module
+            print(">>> NOTE: Imported 'a2a_gemini_optmizied.py' (detected filename typo on disk)")
+        except ImportError as e:
+            sys.exit(f"CRITICAL ERROR: Could not import Gemini optimized file.\nChecked path: {target_folder}\nError: {e}")
+
+elif test_target == "GPT_optimized":
+    target_folder = os.path.join(project_root, "GPT_optimized")
+    print(f"\n>>> TARGET MODE: GPT Optimized")
+    print(f">>> Looking for file in: {target_folder}\n")
+
+    if target_folder not in sys.path:
+        sys.path.insert(0, target_folder)
+
+    try:
+        import a2a_GPT_optimized as sim_module
     except ImportError as e:
-        sys.exit(f"CRITICAL ERROR: Could not import optimized file.\nChecked path: {optimized_folder}\nError: {e}")
+        sys.exit(f"CRITICAL ERROR: Could not import GPT optimized file.\nChecked path: {target_folder}\nError: {e}")
 
 else:
+    # Default to Original
     print("\n>>> TARGET MODE: Original (a2a.py) <<<\n")
     try:
-        from a2a import (
-            PAD_CYCLES,
-            simulate_a2a,
-            am_modulate,
-            fm_modulate,
-            pm_modulate,
-        )
+        import a2a as sim_module
     except ImportError:
          sys.exit("CRITICAL ERROR: Could not import 'a2a.py'. Ensure 'comm_sim' is in your Python path.")
+
+
+# ==========================================
+# Symbol Extraction & Aliasing
+# ==========================================
+# This section ensures that 'simulate_a2a', 'PAD_CYCLES', and the modulation helpers
+# are all available in the local namespace, regardless of which file was imported
+# or what naming convention it uses (e.g. am_modulate vs modulate_am).
+
+simulate_a2a = sim_module.simulate_a2a
+PAD_CYCLES = getattr(sim_module, "PAD_CYCLES", 4) # Default to 4 if missing
+
+# Handle potential naming differences in helpers
+if hasattr(sim_module, "am_modulate"):
+    am_modulate = sim_module.am_modulate
+    fm_modulate = sim_module.fm_modulate
+    pm_modulate = sim_module.pm_modulate
+else:
+    # Fallback: Optimized files might use 'modulate_am' style
+    am_modulate = sim_module.modulate_am
+    fm_modulate = sim_module.modulate_fm
+    pm_modulate = sim_module.modulate_pm
 
 # DEBUG: Verify exactly which file is loaded
 print(f"DEBUG: simulate_a2a is loaded from: {simulate_a2a.__code__.co_filename}\n")
