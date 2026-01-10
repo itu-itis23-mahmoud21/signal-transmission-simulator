@@ -1,39 +1,73 @@
-# Communication Signal Simulator
+# Signal Transmission Simulator 📡
 
-Interactive Streamlit-based simulator for common techniques in computer communications:
+A comprehensive interactive simulator for encoding and modulation techniques, developed to visualize concepts from **Data and Computer Communications**. This tool allows users to generate signals, apply various transmission schemes, and analyze the results through waveforms, step-by-step execution tables, and theoretical explanations.
 
-- Digital-to-Digital line coding (NRZ-L, NRZI, Manchester, Differential Manchester, AMI, Pseudoternary)
-- Scrambling (B8ZS, HDB3)
-- Digital-to-Analog modulation (ASK, FSK, PSK, QPSK, 16-QAM) _(in progress / if included)_
+## 🎓 Academic Context
 
-## Run locally
+This simulator was developed as a course assignment for:
+* **[Principles of Computer Communications (BLG 337E)](https://ninova.itu.edu.tr/en/public.dersler.ders.aspx?dil=en&kategori=faculty-of-computer-and-informatics&dersId=5507)**
+* Computer Engineering Faculty — [Istanbul Technical University](https://itu.edu.tr/en/homepage)
 
-### 1) Create and activate a virtual environment
+> **Reference Material:** > All algorithms in this simulator follow the definitions and conventions provided in:  
+> **[Data and Computer Communications (10th ed.)](http://williamstallings.com/DataComm/)** by William Stallings.
 
-```bash
-python -m venv .venv
-# Windows PowerShell
-.\.venv\Scripts\Activate.ps1
-```
+## ✨ Features
 
-### 2) Install dependencies
+The application supports four major modes of transmission simulation:
 
-```bash
-pip install -r requirements.txt
-```
+### 1. Digital → Digital (Line Coding)
+Converts a digital bitstream into digital signal voltage levels.
+* **Basic Schemes:** NRZ-L, NRZI, Bipolar-AMI, Pseudoternary, Manchester, Differential Manchester.
+* **Scrambling Techniques:** B8ZS, HDB3 (used to fix synchronization issues in AMI).
+* **Comparison Mode:** Visual comparison of the same bit sequence across multiple line coding schemes.
 
-### 3) Start the app
+### 2. Digital → Analog (Modulation)
+Modulates a digital bitstream onto an analog carrier signal.
+* **Amplitude:** ASK (Amplitude Shift Keying).
+* **Frequency:** BFSK (Binary FSK), MFSK (Multiple FSK).
+* **Phase:** BPSK (Binary PSK), DPSK (Differential PSK), QPSK (Quadrature PSK).
+* **Quadrature:** QAM (Quadrature Amplitude Modulation) including 4-QAM and 16-QAM configurations.
+* **Constellations:** Visualizes 16-QAM and QPSK constellation diagrams.
 
-```bash
-streamlit run comm_sim/app.py
-```
+### 3. Analog → Digital (Digitization)
+Converts continuous analog waveforms (Sine, Triangle, Square) into digital data.
+* **PCM (Pulse Code Modulation):** Includes sampling (PAM), quantization, and encoding. Visualizes the quantization error and staircase function.
+* **DM (Delta Modulation):** Visualizes the "staircase" approximation and slope overload/granular noise effects.
+* **Line Coding Integration:** The resulting digital data is automatically line-coded for transmission simulation.
 
-### To run the Tests
+### 4. Analog → Analog (Modulation)
+Modulates an analog message signal onto a higher-frequency carrier.
+* **Techniques:** AM (Amplitude Modulation), FM (Frequency Modulation), PM (Phase Modulation).
+* **Visualizations:** Message signal, modulated carrier, spectrum (FFT) intuition, and ideal demodulated signal overlay.
+* **Theory:** Interactive display of modulation indices ($n_a$, $\beta$, etc.) and bandwidth estimations (Carson's Rule).
 
-```bash
-pytest -q
-```
+## 🚀 Installation & Usage
 
-### Notes
+1.  **Clone the repository:**
+    ```bash
+    git clone [https://github.com/itu-itis23-mahmoud21/signal-transmission-simulator.git](https://github.com/itu-itis23-mahmoud21/signal-transmission-simulator.git)
+    cd signal-transmission-simulator
+    ```
 
-This project was developed for BLG 337E (Principles of Computer Communications), and is intended as an educational simulator.
+2.  **Install dependencies:**
+    It is recommended to use a virtual environment.
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+3.  **Run the application:**
+    ```bash
+    streamlit run comm_sim/app.py
+    ```
+
+4.  **Explore:**
+    Open your browser to the URL provided (usually `http://localhost:8501`). Use the sidebar to select a mode, configure parameters (frequency, amplitude, bit-rate), and click **"Run simulation"**.
+
+## 👥 Authors
+
+Created by:
+* [**Mohamed Ahmed Abdelsattar Mahmoud**](https://github.com/itu-itis23-mahmoud21)
+* [**Racha Baddredine**](https://github.com/racha-badreddine)
+
+---
+*Developed at Istanbul Technical University, 2025.*
