@@ -1047,6 +1047,439 @@ In our simulator:
         """
     )
 
+def render_a2d_theory(
+    *,
+    res,
+    params: SimParams,
+    show_grid: bool,
+    technique: str,
+    kind: str,
+    Am: float,
+    fm: float,
+    duration: float,
+    fs_mult: int,
+    pcm_nbits: int,
+    dm_delta: float,
+    linecode_scheme: str,
+):
+    """
+    Theory tab for Analog → Digital (A2D).
+    Beginner-friendly + aligned with Stallings Ch.5.3 and our a2d.py implementation.
+    Uses the already-computed simulation result `res` to visualize what is actually happening.
+    """
+
+    st.markdown("## Analog data → Digital signals (Digitization)")
+
+    st.markdown(
+        """
+Digitization converts a continuous-time analog waveform into a **bitstream**.
+
+In Stallings §5.3, the “codec” does two main things:  
+1) **Sample** the analog signal (PAM samples).  
+2) Convert samples into **digital data** using either **PCM** or **DM**, then transmit as a digital signal (often with line coding).  
+        """
+    )
+
+    # -------------------------
+    # Sampling theorem (PCM basis)
+    # -------------------------
+    st.markdown("### Sampling (PAM) and the sampling theorem")
+
+    fs_samp = float(res.meta.get("sampler", {}).get("fs_samp", float(fs_mult) * float(fm)))
+    Ts = float(res.meta.get("sampler", {}).get("Ts", 1.0 / fs_samp))
+
+    st.markdown(
+        f"""
+- We sample at: **fs_samp = fs_mult × fm = {fs_mult} × {fm:.3g} = {fs_samp:.3g} Hz**  
+- Sampling interval: **Ts = 1/fs_samp = {Ts:.6g} s**
+
+**Sampling theorem (Stallings):** to preserve all information for an ideal bandlimited signal with highest frequency **B**, sample at **fs ≥ 2B**.  
+In the simulator, `fs_mult` is a practical way to oversample relative to `fm`.
+        """
+    )
+
+    # Visual: message + samples (same style as Waveforms tab)
+    st.markdown("#### Visual: message with sampling instants")
+    t_s = res.meta["sampled"]["t_s"]
+    m_s = res.meta["sampled"]["m_s"]
+
+    x_dt = 0.5
+    tickvals = np.arange(0, duration + 1e-9, x_dt)
+    common_margin = dict(l=60, r=20, t=90, b=50)
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=res.t, y=res.signals["m(t)"], mode="lines", name="m(t)"))
+    fig.add_trace(
+        go.Scatter(
+            x=t_s,
+            y=m_s,
+            mode="markers",
+            name="Samples",
+            marker=dict(color="#FF4B4B", size=8),
+        )
+    )
+
+    # annotate Ts and a couple of sample indices (beginner-friendly)
+    if len(t_s) >= 2:
+        fig.add_annotation(
+            x=float(t_s[1]),
+            y=float(m_s[1]),
+            text=f"Ts = {Ts:.3g}s",
+            showarrow=True,
+            arrowhead=2,
+            ax=30,
+            ay=-35,
+        )
+    if len(t_s) > 0:
+        fig.add_annotation(
+            x=float(t_s[0]),
+            y=float(m_s[0]),
+            text="k=0",
+            showarrow=True,
+            arrowhead=2,
+            ax=20,
+            ay=-25,
+        )
+
+    fig.update_layout(
+        title="Sampling (PAM): continuous message and sampled points",
+        xaxis_title="Time (s)",
+        yaxis_title="Amplitude",
+        legend=dict(
+            orientation="h",
+            x=1.0,
+            y=1.13,
+            xanchor="right",
+            yanchor="bottom",
+            xref="paper",
+            yref="paper",
+            bgcolor="rgba(0,0,0,0)",
+        ),
+        margin=common_margin,
+    )
+    if show_grid:
+        fig.update_xaxes(showgrid=True)
+        fig.update_yaxes(showgrid=True)
+
+    fig.update_xaxes(range=[0, duration], autorange=False)
+    fig.update_xaxes(tickmode="array", tickvals=tickvals)
+
+    st.plotly_chart(fig, width="stretch")
+
+    st.markdown("---")
+
+    # -------------------------
+    # PCM
+    # -------------------------
+    st.markdown("## PCM (Pulse Code Modulation)")
+
+    st.markdown(
+        """
+PCM converts each PAM sample into an **n-bit codeword**:
+
+**Pipeline (book-style):**  
+Analog → PAM sampler → **Quantizer** (L = 2ⁿ levels) → **Encoder** (n-bit blocks) → digital bitstream.
+
+In our implementation (`a2d.py`):
+- Sampling is exact (endpoint excluded so we do not create an extra sample at *t = duration*).
+- Quantizer is **uniform** over [−Am, +Am] with **mid-rise reconstruction**.
+- Then we optionally apply **line coding** to the produced bitstream using the same D2D encoder/decoder.  
+        """
+    )
+
+    # Derived PCM facts (book + our meta)
+    pcm = res.meta.get("pcm", None)
+    if pcm is None:
+        st.info("PCM theory is shown when the selected technique is PCM.")
+    else:
+        n_bits = int(pcm.get("n_bits", pcm_nbits))
+        L = int(pcm.get("L", 2**n_bits))
+        q_delta = float(pcm.get("delta", np.nan))
+        snr_est = float(pcm.get("snr_db_est", 6.02 * n_bits + 1.76))
+
+        R = fs_samp * n_bits
+
+        st.markdown("### Key parameters and the book SNR rule")
+        rows = [
+            {"Item": "Bits per sample (n)", "Value": str(n_bits)},
+            {"Item": "Quantization levels (L = 2^n)", "Value": str(L)},
+            {"Item": "Quantization step (Δ)", "Value": f"{q_delta:.6g}"},
+            {"Item": "Sampling rate (fs_samp)", "Value": f"{fs_samp:.6g} Hz"},
+            {"Item": "Raw bit rate (R = fs_samp × n)", "Value": f"{R:.6g} bps"},
+            {"Item": "SNR estimate (book): 6.02n + 1.76 dB", "Value": f"{snr_est:.2f} dB"},
+            {"Item": "Line coding used for transmission", "Value": str(linecode_scheme)},
+        ]
+        st.dataframe(
+            pd.DataFrame(rows),
+            hide_index=True,
+            width="stretch",
+            column_config={
+                "Item": st.column_config.TextColumn("Item", width="medium"),
+                "Value": st.column_config.TextColumn("Value", width="medium"),
+            },
+        )
+
+        st.markdown("### Visual: quantization staircase (TX vs RX)")
+
+        stair_tx = res.meta.get("stair_tx", None)
+        stair_rx = res.meta.get("stair_rx", None)
+
+        fig2 = go.Figure()
+
+        if stair_tx is not None:
+            fig2.add_trace(
+                go.Scatter(
+                    x=stair_tx["t_s"],
+                    y=stair_tx["x"],
+                    mode="lines",
+                    line_shape="hv",
+                    name="Quantized (TX)",
+                    opacity=0.75,
+                )
+            )
+
+        if stair_rx is not None:
+            fig2.add_trace(
+                go.Scatter(
+                    x=stair_rx["t_s"],
+                    y=stair_rx["x"],
+                    mode="lines",
+                    line_shape="hv",
+                    name="After line-decode + PCM decode (RX)",
+                    line=dict(color="#FF4B4B", dash="dash", width=2),
+                    opacity=0.95,
+                )
+            )
+
+        # Add light horizontal guides at a few quantization levels (beginner-friendly)
+        qvals = np.asarray(pcm.get("q", []), dtype=float)
+        if qvals.size > 0:
+            uniq = np.unique(np.round(qvals, 12))
+            # pick up to ~8 evenly spaced levels to avoid clutter
+            if len(uniq) > 8:
+                idxs = np.linspace(0, len(uniq) - 1, 8).round().astype(int)
+                levels = uniq[idxs]
+            else:
+                levels = uniq
+
+            for lv in levels.tolist():
+                fig2.add_hline(y=float(lv), line_width=1, opacity=0.12)
+
+        fig2.update_layout(
+            title="PCM quantization: staircase representation (mid-rise reconstruction)",
+            xaxis_title="Time (s)",
+            yaxis_title="Amplitude",
+            legend=dict(
+                orientation="h",
+                x=1.0,
+                y=1.13,
+                xanchor="right",
+                yanchor="bottom",
+                xref="paper",
+                yref="paper",
+                bgcolor="rgba(0,0,0,0)",
+            ),
+            margin=common_margin,
+        )
+        if show_grid:
+            fig2.update_xaxes(showgrid=True)
+            fig2.update_yaxes(showgrid=True)
+        fig2.update_xaxes(range=[0, duration], autorange=False)
+        fig2.update_xaxes(tickmode="array", tickvals=tickvals)
+
+        st.plotly_chart(fig2, width="stretch")
+
+        st.markdown("### Mini walk-through (like the book example table)")
+
+        steps = pcm.get("steps", [])
+        if isinstance(steps, list) and len(steps) > 0:
+            show_n = min(12, len(steps))
+            st.caption(f"Showing the first {show_n} samples (k = 0..{show_n-1}).")
+            render_events_table(steps[:show_n], width=1100)
+        else:
+            st.info("No PCM step table found in meta.")
+
+    st.markdown("---")
+
+    # -------------------------
+    # DM
+    # -------------------------
+    st.markdown("## DM (Delta Modulation)")
+
+    st.markdown(
+        """
+Delta Modulation encodes **changes** instead of absolute amplitudes.
+
+**Book logic (feedback staircase):**  
+At each sample time:
+- compare the input sample **x[k]** with the current staircase estimate **est[k]**
+- output **1** if x[k] ≥ est[k] else **0**
+- update the staircase for the next interval by **±Δ**
+
+So DM produces **1 bit per sample**, and the receiver rebuilds the staircase by applying the same ±Δ updates.
+        """
+    )
+
+    dm = res.meta.get("dm", None)
+    if dm is None:
+        st.info("DM theory is shown when the selected technique is DM.")
+    else:
+        delta = float(dm.get("delta", dm_delta))
+        est0 = float(dm.get("est0", 0.0))
+        R_dm = fs_samp * 1.0
+
+        st.markdown("### Key parameters")
+        rows = [
+            {"Item": "Step size (Δ)", "Value": f"{delta:.6g}"},
+            {"Item": "Initial estimate (est0)", "Value": f"{est0:.6g}"},
+            {"Item": "Sampling rate (fs_samp)", "Value": f"{fs_samp:.6g} Hz"},
+            {"Item": "Raw bit rate (R = fs_samp × 1)", "Value": f"{R_dm:.6g} bps"},
+            {"Item": "Line coding used for transmission", "Value": str(linecode_scheme)},
+        ]
+        st.dataframe(
+            pd.DataFrame(rows),
+            hide_index=True,
+            width="stretch",
+            column_config={
+                "Item": st.column_config.TextColumn("Item", width="medium"),
+                "Value": st.column_config.TextColumn("Value", width="medium"),
+            },
+        )
+
+        st.markdown("### The two classic DM errors (book intuition)")
+
+        st.markdown(
+            """
+- **Quantizing noise:** when the analog waveform changes slowly, big Δ makes the staircase “bounce” around the true signal.  
+- **Slope overload:** when the waveform rises/falls too fast, small Δ cannot keep up (staircase lags behind).
+
+To reduce slope overload: increase **fs_samp** and/or increase **Δ**.  
+To reduce quantizing noise: decrease **Δ** (but this risks slope overload).
+            """
+        )
+
+        st.markdown("### Visual: DM staircase tracking")
+
+        stair_tx = res.meta.get("stair_tx", None)
+        stair_rx = res.meta.get("stair_rx", None)
+
+        fig3 = go.Figure()
+        fig3.add_trace(go.Scatter(x=res.t, y=res.signals["m(t)"], mode="lines", name="m(t)", opacity=0.55))
+
+        if stair_tx is not None:
+            fig3.add_trace(
+                go.Scatter(
+                    x=stair_tx["t_s"],
+                    y=stair_tx["x"],
+                    mode="lines",
+                    line_shape="hv",
+                    name="Staircase (TX)",
+                    opacity=0.85,
+                )
+            )
+        if stair_rx is not None:
+            fig3.add_trace(
+                go.Scatter(
+                    x=stair_rx["t_s"],
+                    y=stair_rx["x"],
+                    mode="lines",
+                    line_shape="hv",
+                    name="Staircase (RX)",
+                    line=dict(color="#FF4B4B", dash="dash", width=2),
+                    opacity=0.95,
+                )
+            )
+
+        # annotate Δ on the left as a simple visual cue
+        fig3.add_annotation(
+            x=0.02 * duration,
+            y=float(est0 + delta),
+            text=f"Δ = {delta:.3g}",
+            showarrow=True,
+            arrowhead=2,
+            ax=20,
+            ay=-30,
+        )
+
+        fig3.update_layout(
+            title="Delta Modulation: staircase approximation (TX vs RX) overlaid on the message",
+            xaxis_title="Time (s)",
+            yaxis_title="Amplitude",
+            legend=dict(
+                orientation="h",
+                x=1.0,
+                y=1.13,
+                xanchor="right",
+                yanchor="bottom",
+                xref="paper",
+                yref="paper",
+                bgcolor="rgba(0,0,0,0)",
+            ),
+            margin=common_margin,
+        )
+        if show_grid:
+            fig3.update_xaxes(showgrid=True)
+            fig3.update_yaxes(showgrid=True)
+        fig3.update_xaxes(range=[0, duration], autorange=False)
+        fig3.update_xaxes(tickmode="array", tickvals=tickvals)
+
+        st.plotly_chart(fig3, width="stretch")
+
+        st.markdown("### Mini walk-through (comparator → bit → staircase update)")
+
+        steps = dm.get("steps", [])
+        if isinstance(steps, list) and len(steps) > 0:
+            show_n = min(12, len(steps))
+            st.caption(f"Showing the first {show_n} samples (k = 0..{show_n-1}).")
+            render_events_table(steps[:show_n], width=1100)
+        else:
+            st.info("No DM step table found in meta.")
+
+    st.markdown("---")
+
+    # -------------------------
+    # Transmission stage (line coding) — shared by PCM/DM in our implementation
+    # -------------------------
+    st.markdown("## Transmission stage in *our* simulator: line coding the produced bits")
+
+    line_meta = res.meta.get("linecode", {})
+    match = bool(line_meta.get("match", False))
+    bit_len = int(line_meta.get("bit_len", 0))
+
+    st.markdown(
+        f"""
+After PCM/DM produces bits, we transmit them as a digital waveform using **{linecode_scheme}**:
+
+- TX: `line_encode(bitstream, scheme)`  
+- RX: `line_decode(waveform, scheme)` → back to bits  
+- Then PCM/DM decode reconstructs the samples/staircase.
+
+**Bitstream length:** {bit_len}  
+**Match after line-decode:** {"✅ MATCH" if match else "❌ MISMATCH"}
+        """
+    )
+
+    # Show a small excerpt of bits (beginner-friendly)
+    bits_tx = res.bits.get("bitstream", [])
+    bits_rx = res.bits.get("decoded_bitstream", [])
+    s_tx = "".join("1" if b else "0" for b in bits_tx)[:160]
+    s_rx = "".join("1" if b else "0" for b in bits_rx)[:160]
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.caption("TX bits (prefix)")
+        st.code(s_tx + ("..." if len(bits_tx) > 160 else ""))
+    with c2:
+        st.caption("RX bits (prefix)")
+        st.code(s_rx + ("..." if len(bits_rx) > 160 else ""))
+
+    st.markdown(
+        """
+> Note: This “line coding” stage is exactly the same family of schemes you study in **Digital → Digital**.
+We reuse it here because Stallings explicitly notes that once you have digital data, you can transmit it with a line code.  
+        """
+    )
+
 def empty_state(message: str = "Choose a scheme, optionally generate bits, then click **Run simulation**."):
     # Centered, friendly placeholder
     st.markdown(
@@ -2430,9 +2863,9 @@ elif mode == "Analog → Digital":
         summ = res.meta.get("summary", {})
         summary_block(summ)
 
-        tab1, tab3, tab4 = st.tabs(["Waveforms", "Steps", "Details"])
+        tab_wave, tab_steps, tab_details, tab_theory = st.tabs(["Waveforms", "Steps", "Details", "Theory"])
 
-        with tab1:
+        with tab_wave:
             x_dt = 0.5
             tickvals = np.arange(0, duration + 1e-9, x_dt)
             common_margin = dict(l=60, r=20, t=90, b=50)
@@ -2559,7 +2992,7 @@ elif mode == "Analog → Digital":
                     width="stretch",
                 )
 
-        with tab3:
+        with tab_steps:
             # Steps table (book-style)
             if technique == "PCM":
                 pcm = res.meta.get("pcm", {})
@@ -2622,7 +3055,7 @@ elif mode == "Analog → Digital":
                     else:
                         st.info("No DM steps available.")
 
-        with tab4:
+        with tab_details:
             bits_tx = res.bits.get("bitstream", [])
             bits_rx = res.bits.get("decoded_bitstream", [])
 
@@ -2640,6 +3073,22 @@ elif mode == "Analog → Digital":
                 st.success("MATCH")
             else:
                 st.error("MISMATCH")
+        
+        with tab_theory:
+            render_a2d_theory(
+                res=res,
+                params=params,
+                show_grid=show_grid,
+                technique=technique,
+                kind=kind,
+                Am=float(Am),
+                fm=float(fm),
+                duration=float(duration),
+                fs_mult=int(fs_mult),
+                pcm_nbits=int(pcm_nbits),
+                dm_delta=float(dm_delta),
+                linecode_scheme=str(linecode_scheme),
+            )
 
 
 elif mode == "Analog → Analog":
