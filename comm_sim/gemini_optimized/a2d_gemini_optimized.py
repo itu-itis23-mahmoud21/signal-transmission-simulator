@@ -9,23 +9,22 @@ from d2d import line_encode, line_decode
 
 
 # -------------------------
-# Message generation (analog)
+# Helpers
 # -------------------------
 
 def gen_message(t: np.ndarray, kind: str, Am: float, fm: float) -> np.ndarray:
-    # Optimized: t is already numpy array, operations are vectorized.
+    # Vectorized signal generation
     if kind == "sine":
         return Am * np.sin(2 * np.pi * fm * t)
 
     if kind == "square":
-        # Use numpy sin and where for speed
         s = np.sin(2 * np.pi * fm * t)
         return Am * np.where(s >= 0.0, 1.0, -1.0)
 
     if kind == "triangle":
-        # Vectorized sawtooth calc
+        # Vectorized triangle wave
         x = (t * fm) % 1.0
-        # 4 * abs(x - 0.5) - 1.0 generates triangle
+        # 4 * abs(x - 0.5) - 1.0 
         tri = 4 * np.abs(x - 0.5) - 1.0
         return Am * (-tri)
 
@@ -33,7 +32,6 @@ def gen_message(t: np.ndarray, kind: str, Am: float, fm: float) -> np.ndarray:
 
 
 def _choose_display_fs(fm: float, fs_samp: float) -> float:
-    # Keep logic identical to original
     return float(max(2000.0, 200.0 * fm, 20.0 * fs_samp))
 
 
@@ -41,8 +39,8 @@ def _sample_message_exact(kind: str, Am: float, fm: float, duration: float, fs_s
     if fs_samp <= 0:
         raise ValueError("fs_samp must be positive.")
     Ts = 1.0 / float(fs_samp)
-
-    # exact sampling instants
+    
+    # Exact sampling instants
     t_s = np.arange(0.0, float(duration), Ts, dtype=float)
     m_s = gen_message(t_s, kind, Am, fm)
     return t_s, m_s
@@ -50,16 +48,25 @@ def _sample_message_exact(kind: str, Am: float, fm: float, duration: float, fs_s
 
 def _zoh_reconstruct(t: np.ndarray, t_s: np.ndarray, x_s: np.ndarray) -> np.ndarray:
     """
-    Zero-order-hold reconstruction (Vectorized).
+    Zero-order-hold reconstruction using searchsorted (Binary Search).
     """
     if len(t_s) == 0:
         return np.zeros_like(t, dtype=float)
 
-    # np.searchsorted is highly optimized C-level binary search
+    # Find indices in t_s where elements of t would be inserted
     idx = np.searchsorted(t_s, t, side="right") - 1
-    # Clip indices to valid range
     idx = np.clip(idx, 0, len(x_s) - 1)
     return x_s[idx]
+
+
+def _get_codeword_lut(n_bits: int) -> List[str]:
+    """
+    Generate a Look-Up Table (LUT) for all n-bit binary strings.
+    This avoids calling format() thousands of times.
+    """
+    L = 1 << n_bits
+    fmt = f"0{n_bits}b"
+    return [format(i, fmt) for i in range(L)]
 
 
 # -------------------------
@@ -67,61 +74,56 @@ def _zoh_reconstruct(t: np.ndarray, t_s: np.ndarray, x_s: np.ndarray) -> np.ndar
 # -------------------------
 
 def pcm_quantize(m_s: np.ndarray, n_bits: int, vmin: float, vmax: float) -> Tuple[np.ndarray, np.ndarray, float, int]:
-    """
-    Uniform quantizer (Vectorized).
-    """
     if n_bits <= 0:
         raise ValueError("n_bits must be positive.")
     L = int(2 ** int(n_bits))
     
-    # Vectorized clip
+    # Vectorized quantization
     x = np.clip(m_s, vmin, vmax)
-
+    
+    # Pre-calculate float scalars to avoid re-casting
     delta = float(vmax - vmin) / float(L)
     if delta <= 0:
         raise ValueError("Invalid quantizer range (vmax must be > vmin).")
 
-    # Vectorized floor and cast
+    # Quantize
     idx = np.floor((x - vmin) / delta).astype(int)
     idx = np.clip(idx, 0, L - 1)
 
-    # Vectorized reconstruction
+    # Mid-rise reconstruction
     q = vmin + (idx + 0.5) * delta
     return idx, q, delta, L
 
 
 def pcm_encode_from_idx(idx: np.ndarray, n_bits: int) -> Tuple[List[int], List[str]]:
     """
-    Vectorized bit encoding.
-    Replaces the loop-based string formatting for bit generation.
+    Optimized PCM Encoding.
+    1. Uses bitwise broadcasting for bitstream generation (Vectorized).
+    2. Uses a Lookup Table (LUT) for codeword string generation (O(1)).
     """
-    # 1. Generate Bitstream (Vectorized)
+    # --- 1. Generate Bitstream (Vectorized) ---
     # Create shift array: [n-1, n-2, ... 0]
     shifts = np.arange(n_bits - 1, -1, -1, dtype=int)
     
-    # Broadcast: (N, 1) >> (n_bits,) -> (N, n_bits)
-    # idx must be integer type
+    # Ensure integer type
     idx_int = idx.astype(int)
     
-    # Extract bits: shift right and mask with 1
+    # Broadcast bit extraction: (N, 1) >> (n_bits,) -> (N, n_bits)
+    # Mask with 1 to get the bit value
     bits_matrix = (idx_int[:, None] >> shifts) & 1
     
     # Flatten to get serial bitstream
     bitstream = bits_matrix.flatten().tolist()
 
-    # 2. Generate Codewords (List comprehension)
-    # String formatting is still needed for metadata/UI, but list comp is faster than append loop
-    # We use the f-string in a comprehension
-    fmt = f"0{int(n_bits)}b"
-    codewords = [format(val, fmt) for val in idx_int]
+    # --- 2. Generate Codewords (Lookup Table) ---
+    # Much faster than formatting every integer individually
+    lut = _get_codeword_lut(n_bits)
+    codewords = [lut[val] for val in idx_int]
     
     return bitstream, codewords
 
 
 def pcm_decode_to_idx(bits: List[int], n_bits: int) -> Tuple[np.ndarray, Dict[str, Any]]:
-    """
-    Vectorized bit decoding.
-    """
     n_bits = int(n_bits)
     if n_bits <= 0:
         raise ValueError("n_bits must be positive.")
@@ -137,21 +139,17 @@ def pcm_decode_to_idx(bits: List[int], n_bits: int) -> Tuple[np.ndarray, Dict[st
     # Convert to array
     bits_arr = np.array(bits, dtype=int)
     
-    # Truncate to multiple of n_bits
+    # Reshape to (n_codewords, n_bits)
     valid_len = n_full * n_bits
     bits_matrix = bits_arr[:valid_len].reshape(n_full, n_bits)
     
-    # Vectorized binary to int: Dot product with powers of 2
-    # Powers: [2^(n-1), ..., 1]
+    # Vectorized decode: Dot product with powers of 2
     powers = 1 << np.arange(n_bits - 1, -1, -1, dtype=int)
     idx_hat = bits_matrix.dot(powers)
     
-    # Reconstruct codewords list for meta (optimized list comp)
-    # We join bits back to strings. 
-    # Since we have the integer values (idx_hat), it's actually faster to format the integers
-    # than to slice strings from the bit list again.
-    fmt = f"0{n_bits}b"
-    codewords = [format(val, fmt) for val in idx_hat]
+    # Generate Codewords strings using LUT
+    lut = _get_codeword_lut(n_bits)
+    codewords = [lut[val] for val in idx_hat]
 
     meta = {
         "n_bits": n_bits,
@@ -163,9 +161,6 @@ def pcm_decode_to_idx(bits: List[int], n_bits: int) -> Tuple[np.ndarray, Dict[st
 
 
 def pcm_reconstruct_from_idx(idx: np.ndarray, n_bits: int, vmin: float, vmax: float) -> Tuple[np.ndarray, Dict[str, Any]]:
-    """
-    Vectorized reconstruction.
-    """
     idx = np.asarray(idx, dtype=int)
     L = int(2 ** int(n_bits))
     delta = float(vmax - vmin) / float(L)
@@ -183,10 +178,8 @@ def pcm_reconstruct_from_idx(idx: np.ndarray, n_bits: int, vmin: float, vmax: fl
 
 def dm_encode(m_s: np.ndarray, delta: float, *, est0: float) -> Tuple[List[int], np.ndarray, np.ndarray]:
     """
-    Delta modulation encoder.
-    Optimization: Use pre-allocated numpy arrays and local variable caching to speed up the loop.
-    Note: DM encoding is inherently sequential (feedback), so we cannot fully vectorize,
-    but we can minimize Python object overhead.
+    Delta Modulation Encoder.
+    Optimized to use pre-allocated numpy arrays and minimal loop overhead.
     """
     delta = float(delta)
     if delta <= 0:
@@ -200,14 +193,13 @@ def dm_encode(m_s: np.ndarray, delta: float, *, est0: float) -> Tuple[List[int],
     stair_after = np.empty(n, dtype=float)
     bits_arr = np.empty(n, dtype=int)
     
-    # Convert input to numpy array for fast indexing
-    # (m_s should already be one, but ensure)
+    # Convert input to numpy array for fast access
     m_s_arr = np.asarray(m_s, dtype=float)
     
-    # Optimized loop
+    # The loop is inherently sequential (feedback), but we minimize operations inside.
     for i in range(n):
         stair_before[i] = est
-        # Compare
+        # Single comparison and update
         if m_s_arr[i] >= est:
             bits_arr[i] = 1
             est += delta
@@ -221,8 +213,8 @@ def dm_encode(m_s: np.ndarray, delta: float, *, est0: float) -> Tuple[List[int],
 
 def dm_decode(bits: List[int], delta: float, *, est0: float) -> np.ndarray:
     """
-    Delta modulation decoder.
-    Optimization: Fully vectorized using cumsum.
+    Delta Modulation Decoder.
+    Optimized: Fully vectorized using cumsum.
     """
     delta = float(delta)
     if delta <= 0:
@@ -230,11 +222,11 @@ def dm_decode(bits: List[int], delta: float, *, est0: float) -> np.ndarray:
 
     bits_arr = np.array(bits, dtype=int)
     
-    # Map bits: 1 -> +delta, 0 -> -delta
-    # 1 => 1, 0 => -1.   (b*2 - 1) gives map: 1->1, 0->-1
+    # Map bits to steps: 1 -> +delta, 0 -> -delta
+    # Math trick: (b * 2 - 1) maps {0,1} to {-1,1}
     steps = (bits_arr * 2 - 1) * delta
     
-    # Cumulative sum
+    # Reconstruction is cumulative sum
     stair = float(est0) + np.cumsum(steps)
     
     return stair
@@ -257,23 +249,15 @@ def simulate_a2d(
     dm_delta: float = 0.1,
     linecode_scheme: str = "NRZ-L",
 ) -> SimResult:
-    """
-    Optimized main simulator. 
-    Maintains exact API and metadata structure of the original.
-    """
-
     technique = str(technique)
     if technique not in ("PCM", "DM"):
         raise ValueError("technique must be PCM or DM")
 
-    # --- Sampling rate for PAM ---
+    # --- Sampling rate ---
     fm = float(fm)
     fs_mult = int(fs_mult)
-    
-    if fm <= 0:
-        raise ValueError("fm must be positive.")
-    if fs_mult <= 0:
-        raise ValueError("fs_mult must be positive.")
+    if fm <= 0 or fs_mult <= 0:
+        raise ValueError("fm and fs_mult must be positive.")
     
     fs_samp = float(fs_mult) * fm
     Ts = 1.0 / fs_samp
@@ -323,20 +307,27 @@ def simulate_a2d(
         # 1. Quantize (Vectorized)
         idx, q, q_delta, L = pcm_quantize(m_s, n_bits, vmin=vmin, vmax=vmax)
         
-        # 2. Encode (Vectorized bit packing)
+        # 2. Encode (Vectorized bit packing + LUT strings)
         bitstream, codewords = pcm_encode_from_idx(idx, n_bits=n_bits)
 
-        # 3. Line Coding (External D2D module)
+        # 3. Line Coding
         line_tx, lc_enc_meta = line_encode(bitstream, linecode_scheme, lc_params)
         bitstream_rx, lc_dec_meta = line_decode(line_tx, linecode_scheme, lc_params)
 
-        # 4. PCM Decode (Vectorized)
+        # 4. Decode (Vectorized + LUT strings)
         idx_hat, pcm_dec_meta = pcm_decode_to_idx(bitstream_rx, n_bits=n_bits)
         q_hat, pcm_rec_meta = pcm_reconstruct_from_idx(idx_hat, n_bits=n_bits, vmin=vmin, vmax=vmax)
 
-        # 5. Reconstruction (Vectorized ZOH)
+        # 5. Reconstruct (Vectorized ZOH)
         recon_tx = _zoh_reconstruct(t, t_s, q)
-        t_s_rx = t_s[:len(q_hat)] if len(q_hat) <= len(t_s) else np.arange(len(q_hat), dtype=float) * Ts
+        
+        # Align Rx time axis
+        len_qhat = len(q_hat)
+        if len_qhat <= len(t_s):
+             t_s_rx = t_s[:len_qhat]
+        else:
+             t_s_rx = np.arange(len_qhat, dtype=float) * Ts
+        
         recon_rx = _zoh_reconstruct(t, t_s_rx, q_hat)
 
         signals.update({
@@ -348,8 +339,8 @@ def simulate_a2d(
         bits_out["bitstream"] = bitstream
         bits_out["decoded_bitstream"] = bitstream_rx
 
-        # Metadata: "steps" table (List comp for speed, required by tests)
-        # Using zip for iteration is faster than range indexing
+        # Create Metadata Steps List
+        # Optimized list comprehension using zip to avoid index lookups
         steps = [
             {
                 "k": k,
@@ -385,20 +376,12 @@ def simulate_a2d(
         meta["stair_tx"] = {"t_s": t_s, "x": q}
         meta["stair_rx"] = {"t_s": t_s_rx, "x": q_hat}
 
-        meta["linecode"] = {
-            "scheme": linecode_scheme,
-            "encode": lc_enc_meta,
-            "decode": lc_dec_meta,
-            "match": (bitstream_rx == bitstream),
-            "bit_len": int(len(bitstream)),
-        }
-
     # ---------------- DM ----------------
     else:
         delta = float(dm_delta)
         est0 = 0.0
 
-        # 1. DM Encode (Semi-vectorized/Pre-allocated)
+        # 1. DM Encode (Optimized Loop)
         bitstream, stair_before, stair_after = dm_encode(m_s, delta=delta, est0=est0)
 
         # 2. Line Code
@@ -408,20 +391,22 @@ def simulate_a2d(
         # 3. DM Decode (Vectorized)
         stair_rx_after = dm_decode(bitstream_rx, delta=delta, est0=est0)
 
-        # Staircase alignment for plotting
+        # Prep stairs for plotting
+        # Add initial point
         if len(t_s) > 0:
-            t_stair = np.concatenate([[t_s[0]], t_s])
+            t_stair = np.concatenate((np.array([t_s[0]]), t_s))
         else:
-            t_stair = np.array([0.0], dtype=float)
+            t_stair = np.array([0.0])
 
-        x_tx_stair = np.concatenate([[est0], stair_after])
-        x_rx_stair = np.concatenate([[est0], stair_rx_after])
+        x_tx_stair = np.concatenate((np.array([est0]), stair_after))
+        x_rx_stair = np.concatenate((np.array([est0]), stair_rx_after))
 
+        # Align
         n_rx = min(len(t_stair), len(x_rx_stair))
         t_rx_stair = t_stair[:n_rx]
         x_rx_stair = x_rx_stair[:n_rx]
 
-        # 4. Reconstruction (Vectorized)
+        # 4. Reconstruct (Vectorized ZOH)
         recon_tx = _zoh_reconstruct(t, t_stair, x_tx_stair)
         recon_rx = _zoh_reconstruct(t, t_rx_stair, x_rx_stair)
 
@@ -434,7 +419,8 @@ def simulate_a2d(
         bits_out["bitstream"] = bitstream
         bits_out["decoded_bitstream"] = bitstream_rx
 
-        # Metadata: "steps" table
+        # Metadata Steps List (Optimized List Comp)
+        # Slicing is safer/faster than min() + range check
         n_show = min(len(m_s), len(bitstream), len(stair_before), len(stair_after))
         steps = [
             {
@@ -445,7 +431,6 @@ def simulate_a2d(
                 "DM bit": int(bitstream[k]),
                 "Stair (after)": float(stair_after[k]),
             }
-            # Use islice/range logic or simple slicing for safe iteration
             for k in range(n_show)
         ]
 
@@ -462,18 +447,18 @@ def simulate_a2d(
         meta["stair_tx"] = {"t_s": t_stair, "x": x_tx_stair}
         meta["stair_rx"] = {"t_s": t_rx_stair, "x": x_rx_stair}
 
-        meta["linecode"] = {
-            "scheme": linecode_scheme,
-            "encode": lc_enc_meta,
-            "decode": lc_dec_meta,
-            "match": (bitstream_rx == bitstream),
-            "bit_len": int(len(bitstream)),
-        }
+    # Common Meta
+    meta["linecode"] = {
+        "scheme": linecode_scheme,
+        "encode": lc_enc_meta,
+        "decode": lc_dec_meta,
+        "match": (bits_out["decoded_bitstream"] == bits_out["bitstream"]),
+        "bit_len": int(len(bits_out["bitstream"])),
+    }
 
-    # Common sampled info for UI
     meta["sampled"] = {"t_s": t_s, "m_s": m_s}
-
-    # Time axis for linecode waveform
+    
+    # Time axis for linecode
     t_bits = make_time_axis(len(signals["linecode"]), lc_params.fs)
     meta["t_bits"] = t_bits
 
