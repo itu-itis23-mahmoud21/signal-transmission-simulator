@@ -52,7 +52,12 @@
 #
 # How to run
 # ----------
-#   pytest -q comm_sim/tests/test_d2a.py
+# Set the environment variable `TEST_TARGET` to either `original` or `optimized` to select
+# which implementation to test. If not set, defaults to `original`.
+#  - Example (Linux/Mac):
+#      TEST_TARGET=optimized pytest -v comm_sim/tests/test_d2a.py
+#  - Example (Windows CMD):
+#      set TEST_TARGET=optimized&& pytest -v comm_sim/tests/test_d2a.py
 
 
 from __future__ import annotations
