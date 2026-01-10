@@ -176,7 +176,7 @@ def simulate_a2a(
 
     fs = _require_positive("params.fs", params.fs)
     fc = _require_positive("params.fc", params.fc)
-    Ac = float(params.Ac)
+    Ac = _require_positive("params.Ac", params.Ac)
 
     Am = float(Am)
     fm = _require_positive("fm", fm)
