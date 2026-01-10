@@ -8,6 +8,7 @@ from scipy.signal import hilbert
 from utils import SimParams, SimResult, make_time_axis
 from a2d import gen_message
 
+PAD_CYCLES = 10  # number of carrier cycles to reflect-pad/crop (8–12 is a good range)
 
 # -----------------------------
 # Helpers
@@ -173,7 +174,7 @@ def am_demodulate_envelope(
         return np.zeros_like(s_t), Ac * np.ones_like(s_t)
 
     # Envelope detector via analytic signal amplitude (Hilbert), with reflect-padding for clean edges
-    pad = max(8, int(round(3.0 * fs / max(1.0, fc))))
+    pad = max(8, int(round(PAD_CYCLES * fs / max(1.0, fc))))
     env, _ = _analytic_amp_phase(s_t, pad=pad)  # env = |hilbert(s)|
 
     base = env / Ac                 # ≈ 1 + na*x(t)
@@ -192,7 +193,7 @@ def pm_demodulate_phase(
       m_hat(t) = φ_dev(t) / n_p
     Returns: (m_hat, phase_dev)
     """
-    pad = max(8, int(round(3.0 * fs / max(1.0, fc))))
+    pad = max(8, int(round(PAD_CYCLES * fs / max(1.0, fc))))
     _, phase = _analytic_amp_phase(s_t, pad=pad)
     phase_dev = phase - 2 * np.pi * float(fc) * t
     phase_dev = phase_dev - np.mean(phase_dev)
@@ -214,7 +215,7 @@ def fm_demodulate_instfreq(
       m_hat(t) = (2π/n_f) * (f_i(t) - f_c)
     Returns: (m_hat, inst_freq)
     """
-    pad = max(8, int(round(3.0 * fs / max(1.0, fc))))
+    pad = max(8, int(round(PAD_CYCLES * fs / max(1.0, fc))))
     _, phase = _analytic_amp_phase(s_t, pad=pad)
     inst_freq = np.gradient(phase) * float(fs) / (2 * np.pi)
 
@@ -291,7 +292,7 @@ def simulate_a2a(
     # time axis (pad for AM to avoid Hilbert edge artifacts in the displayed window)
     N = int(round(duration * fs))
     # pad for Hilbert/phase edge artifacts (AM/FM/PM all use analytic signal in demod)
-    padN = max(8, int(round(3.0 * fs / max(1.0, fc)))) if (N > 0) else 0
+    padN = max(8, int(round(PAD_CYCLES * fs / max(1.0, fc)))) if (N > 0) else 0
     N_full = N + 2 * padN
 
     if N_full > 0:

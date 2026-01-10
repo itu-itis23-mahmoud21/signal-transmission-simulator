@@ -2354,20 +2354,11 @@ elif mode == "Analog → Analog":
         m0 = m0[:n]
         mr = mr[:n]
 
+        # Match check must analyze exactly what is shown in Waveforms.
+        # Since simulate_a2a already does pad→demod→crop, we do NOT crop again here.
         guard = 0
-        if scheme == "AM":
-            guard = max(2, int(round(0.01 * float(fs_a))))
-        elif scheme in ("FM", "PM"):
-            guard = max(2, int(round(0.005 * float(fs_a))))
-
-        guard = min(guard, n // 4)  # keep it safe
-
-        if guard > 0 and (n - 2 * guard) >= 10:
-            m0c = m0[guard : n - guard]
-            mrc = mr[guard : n - guard]
-        else:
-            m0c = m0
-            mrc = mr
+        m0c = m0
+        mrc = mr
 
         # Remove DC bias before scoring (helps especially for small n_a)
         m0c = m0c - float(np.mean(m0c))
