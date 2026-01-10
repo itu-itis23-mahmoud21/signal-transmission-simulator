@@ -2016,15 +2016,44 @@ elif mode == "Analog → Analog":
         Ac_a = st.number_input("Carrier amplitude Ac", min_value=0.1, value=1.0, step=0.1, key="a2a_Ac")
 
         st.subheader("Modulation parameter")
+
         na = 0.5
-        kf = 5.0
-        kp = 1.0
+        nf = 2 * np.pi * 5.0   # rad/s per unit amplitude
+        np_ = 1.0              # rad per unit amplitude
+
         if scheme == "AM":
             na = st.slider("n_a (modulation index)", 0.05, 1.5, 0.5, step=0.05, key="a2a_na")
+
         elif scheme == "FM":
-            kf = st.slider("kf (Hz per unit amplitude)", 0.1, 50.0, 5.0, step=0.1, key="a2a_kf")
-        else:
-            kp = st.slider("kp (radians per unit amplitude)", 0.0, 10.0, 1.0, step=0.1, key="a2a_kp")
+            nf = st.slider(
+                "n_f (rad/s per unit amplitude)",
+                0.1, 400.0, float(2 * np.pi * 5.0),
+                step=0.5,
+                key="a2a_nf",
+            )
+            st.caption("φ'(t) = n_f m(t)  ⇒  ΔF = (n_f A_m)/(2π)")
+
+        else:  # PM
+            np_ = st.slider(
+                "n_p (rad per unit amplitude)",
+                0.1, 10.0, 1.0,
+                step=0.1,
+                key="a2a_np",
+            )
+            st.caption("φ(t) = n_p m(t)  ⇒  Δφ_max = n_p A_m")
+        
+        # Extra aliasing sanity checks for angle modulation (beyond fc < fs/2)
+        if scheme == "FM":
+            delta_f_max = abs(float(nf)) * float(Am) / (2 * np.pi)
+            if (fc_a + delta_f_max) >= 0.5 * fs_a:
+                st.error("Invalid: fc + ΔF must be < fs/2 (FM would alias). Increase fs or reduce n_f / Am / fc.")
+                invalid_carrier = True
+
+        if scheme == "PM":
+            delta_f_max = abs(float(np_)) * float(Am) * float(fm)  # single-tone approx
+            if (fc_a + delta_f_max) >= 0.5 * fs_a:
+                st.error("Invalid: fc + ΔF must be < fs/2 (PM would alias). Increase fs or reduce n_p / Am / fm / fc.")
+                invalid_carrier = True
 
         run = st.button("Run simulation", type="primary", key="a2a_run", disabled=invalid_carrier)
 
@@ -2041,8 +2070,8 @@ elif mode == "Analog → Analog":
         fm=float(fm),
         duration=float(duration),
         na=float(na),
-        kf=float(kf),
-        kp=float(kp),
+        nf=float(nf),
+        np_=float(np_),
     )
 
     if "a2a_last" not in st.session_state:
@@ -2063,8 +2092,8 @@ elif mode == "Analog → Analog":
                 fm=float(fm),
                 duration=float(duration),
                 na=float(na),
-                kf=float(kf),
-                kp=float(kp),
+                nf=float(nf),
+                np_=float(np_),
             )
         except Exception as e:
             st.error(f"Simulation error: {e}")
@@ -2093,9 +2122,8 @@ elif mode == "Analog → Analog":
         "na": ".2f",
         "mu": ".2f",
         "BW_hint_Hz": ".0f",
-        # (future-proof for FM/PM)
-        "kf": ".2f",
-        "kp": ".2f",
+        "nf": ".2f",
+        "np": ".2f",
         "Δf_max_Hz": ".2f",
         "β": ".3f",
         "BW_Carson_Hz": ".0f",
@@ -2246,11 +2274,11 @@ elif mode == "Analog → Analog":
             steps.append({"Stage": "3) AM modulator", "Description": "Book (DSBTC): s(t) = A_c[1 + n_a x(t)]sin(2πf_ct), with x(t)=m(t)/max|m(t)|."})
             steps.append({"Stage": "4) (Ideal) AM demod", "Description": "Envelope estimate via analytic signal; x̂(t) ≈ (env/A_c − 1)/n_a, then m̂(t)=x̂·max|m(t)|."})
         elif scheme == "FM":
-            steps.append({"Stage": "3) FM modulator", "Description": "s(t)=A_c sin(2π f_c t + 2π k_f ∫ m(τ)dτ)."})
-            steps.append({"Stage": "4) (Ideal) FM demod", "Description": "Instantaneous frequency from phase derivative; m̂(t) ≈ (f_i(t)−f_c)/k_f."})
+            steps.append({"Stage": "3) FM modulator", "Description": "Angle modulation: s(t)=A_c sin(2πf_ct + φ(t)), with φ'(t)=n_f m(t) (Stallings 16.4) ⇒ φ(t)=∫ n_f m(τ)dτ."})
+            steps.append({"Stage": "4) (Ideal) FM demod", "Description": "f_i(t)=(1/2π)d/dt[2πf_ct+φ(t)] ⇒ m̂(t)=(2π/n_f)(f_i(t)−f_c)."})
         else:
-            steps.append({"Stage": "3) PM modulator", "Description": "s(t)=A_c sin(2π f_c t + k_p m(t))."})
-            steps.append({"Stage": "4) (Ideal) PM demod", "Description": "Phase deviation from analytic phase; m̂(t) ≈ (φ(t)−2πf_ct)/k_p."})
+            steps.append({"Stage": "3) PM modulator", "Description": "Angle modulation: s(t)=A_c sin(2πf_ct + φ(t)), with φ(t)=n_p m(t) (Stallings 16.3)."})
+            steps.append({"Stage": "4) (Ideal) PM demod", "Description": "Extract phase deviation: φ_dev(t)=phase−2πf_ct ⇒ m̂(t)=φ_dev(t)/n_p."})
 
         dfs = pd.DataFrame(steps)
         st.dataframe(
@@ -2286,18 +2314,18 @@ elif mode == "Analog → Analog":
             elif scheme == "FM":
                 fm_meta = res.meta.get("fm", {})
                 rows += [
-                    {"Item": "kf (Hz per unit)", "Value": _fmt(fm_meta.get("kf_hz_per_unit", kf))},
-                    {"Item": "Max freq deviation Δf (Hz)", "Value": _fmt(fm_meta.get("delta_f_max_hz", ""))},
-                    {"Item": "FM index β = Δf/fm", "Value": _fmt(fm_meta.get("beta_index", ""))},
-                    {"Item": "Carson BW ≈ 2(Δf + fm) (Hz)", "Value": _fmt(fm_meta.get("bw_carson_hz", ""))},
+                    {"Item": "n_f (rad/s per unit)", "Value": _fmt(fm_meta.get("nf_rad_per_s_per_unit", nf))},
+                    {"Item": "Max freq deviation ΔF (Hz) = (n_f A_m)/(2π)", "Value": _fmt(fm_meta.get("delta_f_max_hz", ""))},
+                    {"Item": "FM index β = ΔF/fm", "Value": _fmt(fm_meta.get("beta_index", ""))},
+                    {"Item": "Carson BW ≈ 2(ΔF + fm) (Hz)", "Value": _fmt(fm_meta.get("bw_carson_hz", ""))},
                 ]
             else:
                 pm = res.meta.get("pm", {})
                 rows += [
-                    {"Item": "kp (rad per unit)", "Value": _fmt(pm.get("kp_rad_per_unit", kp))},
-                    {"Item": "Max phase dev Δφ (rad)", "Value": _fmt(pm.get("delta_phi_max_rad", ""))},
-                    {"Item": "Max freq dev Δf (Hz, sine approx)", "Value": _fmt(pm.get("delta_f_max_hz_sine_approx", ""))},
-                    {"Item": "Carson BW ≈ 2(Δf + fm) (Hz)", "Value": _fmt(pm.get("bw_carson_hz_sine_approx", ""))},
+                    {"Item": "n_p (rad per unit)", "Value": _fmt(pm.get("np_rad_per_unit", np_))},
+                    {"Item": "Max phase dev Δφ (rad) = n_p A_m", "Value": _fmt(pm.get("delta_phi_max_rad", ""))},
+                    {"Item": "Max freq dev ΔF (Hz, single-tone approx) ≈ n_p A_m f_m", "Value": _fmt(pm.get("delta_f_max_hz_sine_approx", ""))},
+                    {"Item": "Carson BW ≈ 2(ΔF + fm) (Hz)", "Value": _fmt(pm.get("bw_carson_hz_sine_approx", ""))},
                 ]
 
             dfp = pd.DataFrame(rows)
@@ -2326,12 +2354,13 @@ elif mode == "Analog → Analog":
         m0 = m0[:n]
         mr = mr[:n]
 
-        # --- Robust comparison for AM (tiny n_a amplifies tiny envelope/Hilbert residuals) ---
         guard = 0
         if scheme == "AM":
-            # trim a small region at both ends (edge effects)
-            guard = max(2, int(round(0.01 * float(fs_a))))  # e.g., 100 samples at fs=10k
-            guard = min(guard, n // 4)  # keep it safe
+            guard = max(2, int(round(0.01 * float(fs_a))))
+        elif scheme in ("FM", "PM"):
+            guard = max(2, int(round(0.005 * float(fs_a))))
+
+        guard = min(guard, n // 4)  # keep it safe
 
         if guard > 0 and (n - 2 * guard) >= 10:
             m0c = m0[guard : n - guard]

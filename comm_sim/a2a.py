@@ -120,27 +120,30 @@ def am_modulate(x_t: np.ndarray, t: np.ndarray, *, Ac: float, fc: float, na: flo
     return float(Ac) * (1.0 + float(na) * x_t) * np.sin(2 * np.pi * float(fc) * t)
 
 
-def pm_modulate(m_t: np.ndarray, t: np.ndarray, *, Ac: float, fc: float, kp: float) -> np.ndarray:
+def pm_modulate(m_t: np.ndarray, t: np.ndarray, *, Ac: float, fc: float, np_: float) -> np.ndarray:
     """
-    Phase modulation (PM):
-      s(t) = Ac cos(2π f_c t + kp * m(t))
+    Phase modulation (PM) — Stallings (16.3):
+      φ(t) = n_p m(t)
+      s(t) = A_c sin(2π f_c t + φ(t)) = A_c sin(2π f_c t + n_p m(t))
     """
-    return float(Ac) * np.sin(2 * np.pi * float(fc) * t + float(kp) * m_t)
+    return float(Ac) * np.sin(2 * np.pi * float(fc) * t + float(np_) * m_t)
 
 
 def fm_modulate(
-    m_t: np.ndarray, t: np.ndarray, *, Ac: float, fc: float, kf: float, fs: float
+    m_t: np.ndarray, t: np.ndarray, *, Ac: float, fc: float, nf: float, fs: float
 ) -> np.ndarray:
     """
-    Frequency modulation (FM):
-      s(t) = Ac cos( 2π f_c t + 2π kf ∫ m(τ) dτ )
+    Frequency modulation (FM) — Stallings (16.4):
+      φ'(t) = n_f m(t)      [rad/s]
+      φ(t) = ∫ n_f m(τ) dτ  [rad]
+      s(t) = A_c sin(2π f_c t + φ(t))
 
-    Here kf is a frequency sensitivity in (Hz per unit amplitude).
-    Instantaneous frequency: f_i(t) = f_c + kf*m(t)
+    Peak frequency deviation:
+      ΔF = (1/2π) * n_f * A_m   [Hz]
     """
     fs = float(fs)
-    integral = np.cumsum(m_t) / fs  # ∫ m(t) dt (rectangular integration)
-    phase = 2 * np.pi * float(fc) * t + 2 * np.pi * float(kf) * integral
+    phi = np.cumsum(m_t) * float(nf) / fs   # ∫ n_f m(t) dt  (rectangular)
+    phase = 2 * np.pi * float(fc) * t + phi
     return float(Ac) * np.sin(phase)
 
 def am_demodulate_envelope(
@@ -181,72 +184,64 @@ def am_demodulate_envelope(
 
 
 def pm_demodulate_phase(
-    s_t: np.ndarray, *, t: np.ndarray, fc: float, kp: float, fs: float
+    s_t: np.ndarray, *, t: np.ndarray, fc: float, np_: float, fs: float
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Coherent PM demod via analytic phase:
+    PM demod via analytic phase:
       φ_dev(t) ≈ unwrap(angle(hilbert(s))) - 2π f_c t
-      m_hat(t) = φ_dev(t) / kp
+      m_hat(t) = φ_dev(t) / n_p
     Returns: (m_hat, phase_dev)
     """
-    pad = max(8, int(round(0.01 * fs)))
+    pad = max(8, int(round(3.0 * fs / max(1.0, fc))))
     _, phase = _analytic_amp_phase(s_t, pad=pad)
     phase_dev = phase - 2 * np.pi * float(fc) * t
-
-    # remove residual offset/drift
     phase_dev = phase_dev - np.mean(phase_dev)
 
-    kp = float(kp)
-    if kp == 0.0:
+    np_ = float(np_)
+    if np_ == 0.0:
         return np.zeros_like(s_t), phase_dev
 
-    m_hat = phase_dev / kp
+    m_hat = phase_dev / np_
     return m_hat, phase_dev
 
 
 def fm_demodulate_instfreq(
-    s_t: np.ndarray, *, fc: float, kf: float, fs: float
+    s_t: np.ndarray, *, fc: float, nf: float, fs: float
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     FM demod via instantaneous frequency:
       f_i(t) = (1/2π) d/dt phase(t)
-      m_hat(t) = (f_i(t) - f_c) / kf
+      m_hat(t) = (2π/n_f) * (f_i(t) - f_c)
     Returns: (m_hat, inst_freq)
     """
-    pad = max(8, int(round(0.01 * fs)))
+    pad = max(8, int(round(3.0 * fs / max(1.0, fc))))
     _, phase = _analytic_amp_phase(s_t, pad=pad)
     inst_freq = np.gradient(phase) * float(fs) / (2 * np.pi)
 
-    # stabilize derivative at the edges
     if inst_freq.size >= 2:
         inst_freq[0] = inst_freq[1]
         inst_freq[-1] = inst_freq[-2]
 
-    # mild smoothing (derivative amplifies noise)
     win = max(1, int(round(fs / max(1.0, fc) * 0.10)))
     inst_freq = _moving_average(inst_freq, win)
 
-    # stabilize edges (derivative + unwrap can still spike near boundaries)
     if inst_freq.size >= 2:
         inst_freq[0] = inst_freq[1]
         inst_freq[-1] = inst_freq[-2]
 
-    # NEW: clamp a small guard region at both ends to kill residual boundary spikes
     if inst_freq.size >= 10:
-        guard = max(2, int(round(0.005 * fs)))  # ~0.5% of a second worth of samples (e.g., 50 at fs=10k)
-        guard = min(guard, inst_freq.size // 4)  # keep it reasonable
-
+        guard = max(2, int(round(0.005 * fs)))
+        guard = min(guard, inst_freq.size // 4)
         inst_freq[:guard] = inst_freq[guard]
         inst_freq[-guard:] = inst_freq[-guard - 1]
 
-
-    kf = float(kf)
-    if kf == 0.0:
+    nf = float(nf)
+    if nf == 0.0:
         return np.zeros_like(s_t), inst_freq
 
-    f_dev = inst_freq - float(fc)
-    f_dev = f_dev - np.mean(f_dev)
-    m_hat = f_dev / kf
+    f_dev = inst_freq - float(fc)          # Hz
+    f_dev = f_dev - np.mean(f_dev)         # remove residual bias
+    m_hat = (2 * np.pi * f_dev) / nf       # Stallings (16.4) inversion
     return m_hat, inst_freq
 
 
@@ -262,8 +257,8 @@ def simulate_a2a(
     fm: float,
     duration: float,
     na: float = 0.5,
-    kf: float = 5.0,
-    kp: float = 1.0,
+    nf: float = 2 * np.pi * 5.0,   # rad/s per unit amplitude (book n_f)
+    np_: float = 1.0,              # rad per unit amplitude (book n_p)
 ) -> SimResult:
     """
     Analog → Analog modulation simulation (Ch.16.1 conventions).
@@ -295,7 +290,8 @@ def simulate_a2a(
 
     # time axis (pad for AM to avoid Hilbert edge artifacts in the displayed window)
     N = int(round(duration * fs))
-    padN = max(8, int(round(3.0 * fs / max(1.0, fc)))) if (scheme == "AM" and N > 0) else 0
+    # pad for Hilbert/phase edge artifacts (AM/FM/PM all use analytic signal in demod)
+    padN = max(8, int(round(3.0 * fs / max(1.0, fc)))) if (N > 0) else 0
     N_full = N + 2 * padN
 
     if N_full > 0:
@@ -374,15 +370,26 @@ def simulate_a2a(
         )
 
     elif scheme == "FM":
-        s = fm_modulate(m, t, Ac=Ac, fc=fc, kf=kf, fs=fs) if N > 0 else np.array([], dtype=float)
-        m_hat, inst_freq = fm_demodulate_instfreq(s, fc=fc, kf=kf, fs=fs)
+        # Modulate/demod on padded record, then crop (removes end ripple)
+        s_full = fm_modulate(m_full, t_full, Ac=Ac, fc=fc, nf=nf, fs=fs) if N_full > 0 else np.array([], dtype=float)
+        m_hat_full, inst_freq_full = fm_demodulate_instfreq(s_full, fc=fc, nf=nf, fs=fs)
 
-        delta_f = abs(float(kf)) * m_peak
+        if N > 0:
+            s = s_full[padN:padN + N]
+            m_hat = m_hat_full[padN:padN + N]
+            inst_freq = inst_freq_full[padN:padN + N]
+        else:
+            s = np.array([], dtype=float)
+            m_hat = np.array([], dtype=float)
+            inst_freq = np.array([], dtype=float)
+
+        # Book: ΔF = (n_f * A_m)/(2π)
+        delta_f = abs(float(nf)) * m_peak / (2 * np.pi)
         beta = (delta_f / fm) if fm > 0 else float("inf")
         bw_carson = 2.0 * (delta_f + fm)
 
         meta["fm"] = {
-            "kf_hz_per_unit": float(kf),
+            "nf_rad_per_s_per_unit": float(nf),
             "delta_f_max_hz": float(delta_f),
             "beta_index": float(beta),
             "bw_carson_hz": float(bw_carson),
@@ -391,15 +398,25 @@ def simulate_a2a(
         signals.update({"tx": s, "inst_freq": inst_freq, "recovered": m_hat})
 
     else:  # PM
-        s = pm_modulate(m, t, Ac=Ac, fc=fc, kp=kp) if N > 0 else np.array([], dtype=float)
-        m_hat, phase_dev = pm_demodulate_phase(s, t=t, fc=fc, kp=kp, fs=fs)
+        # Modulate/demod on padded record, then crop (removes end ripple)
+        s_full = pm_modulate(m_full, t_full, Ac=Ac, fc=fc, np_=np_) if N_full > 0 else np.array([], dtype=float)
+        m_hat_full, phase_dev_full = pm_demodulate_phase(s_full, t=t_full, fc=fc, np_=np_, fs=fs)
 
-        delta_phi = abs(float(kp)) * m_peak  # radians
-        delta_f = abs(float(kp)) * m_peak * fm  # Hz (sine approx)
+        if N > 0:
+            s = s_full[padN:padN + N]
+            m_hat = m_hat_full[padN:padN + N]
+            phase_dev = phase_dev_full[padN:padN + N]
+        else:
+            s = np.array([], dtype=float)
+            m_hat = np.array([], dtype=float)
+            phase_dev = np.array([], dtype=float)
+
+        delta_phi = abs(float(np_)) * m_peak
+        delta_f = abs(float(np_)) * m_peak * fm
         bw_carson = 2.0 * (delta_f + fm)
 
         meta["pm"] = {
-            "kp_rad_per_unit": float(kp),
+            "np_rad_per_unit": float(np_),
             "delta_phi_max_rad": float(delta_phi),
             "delta_f_max_hz_sine_approx": float(delta_f),
             "bw_carson_hz_sine_approx": float(bw_carson),
@@ -428,7 +445,7 @@ def simulate_a2a(
     elif scheme == "FM":
         summary.update(
             {
-                "kf": float(kf),
+                "nf": float(nf),
                 "Δf_max_Hz": float(meta["fm"]["delta_f_max_hz"]),
                 "β": float(meta["fm"]["beta_index"]),
                 "BW_Carson_Hz": float(meta["fm"]["bw_carson_hz"]),
@@ -437,7 +454,7 @@ def simulate_a2a(
     else:
         summary.update(
             {
-                "kp": float(kp),
+                "np": float(np_),
                 "Δφ_max_rad": float(meta["pm"]["delta_phi_max_rad"]),
                 "Δf_max_Hz": float(meta["pm"]["delta_f_max_hz_sine_approx"]),
                 "BW_Carson_Hz": float(meta["pm"]["bw_carson_hz_sine_approx"]),
