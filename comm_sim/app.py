@@ -203,49 +203,50 @@ with st.sidebar:
     # -------------------------
     # Common params (mode-aware)
     # -------------------------
-    st.subheader("Common parameters")
+    if mode != "Analog → Analog":
+        st.subheader("Common parameters")
 
-    # Always meaningful (Digital sampling / time base)
-    Ns = st.slider("Samples per bit (Ns)", 20, 400, 100, step=10)
-    Tb = st.number_input("Bit duration Tb (s)", min_value=0.001, value=1.0, step=0.1)
+        # Always meaningful (Digital sampling / time base)
+        Ns = st.slider("Samples per bit (Ns)", 20, 400, 100, step=10)
+        Tb = st.number_input("Bit duration Tb (s)", min_value=0.001, value=1.0, step=0.1)
 
-    # Derived sampling rate
-    fs = Ns / Tb
-    st.text_input(
-        "Sampling frequency\nfs = Ns / Tb  (Hz)",
-        value=f"{fs:.6g}",
-        disabled=True,
-    )
-
-    # Carrier controls only for Digital → Analog
-    # (Keep hidden defaults for other modes so SimParams stays valid everywhere)
-    Ac_default = 1.0
-    cycles_default = 10
-
-    if mode == "Digital → Analog":
-        st.divider()
-        st.subheader("Carrier parameters")
-
-        Ac = st.number_input("Carrier amplitude Ac", min_value=0.1, value=1.0, step=0.1)
-        cycles_per_bit = st.slider("Carrier cycles per bit", 2, 30, 10)
-    else:
-        Ac = Ac_default
-        cycles_per_bit = cycles_default
-
-    fc = float(cycles_per_bit) / float(Tb)
-
-    # Show fc only when it matters (Digital → Analog)
-    if mode == "Digital → Analog":
+        # Derived sampling rate
+        fs = Ns / Tb
         st.text_input(
-            "Carrier frequency\nfc = cycles_per_bit / Tb  (Hz)",
-            value=f"{fc:.6g}",
+            "Sampling frequency\nfs = Ns / Tb  (Hz)",
+            value=f"{fs:.6g}",
             disabled=True,
         )
 
-    params = SimParams(fs=fs, Tb=Tb, samples_per_bit=Ns, Ac=Ac, fc=fc)
+        # Carrier controls only for Digital → Analog
+        # (Keep hidden defaults for other modes so SimParams stays valid everywhere)
+        Ac_default = 1.0
+        cycles_default = 10
+
+        if mode == "Digital → Analog":
+            st.divider()
+            st.subheader("Carrier parameters")
+
+            Ac = st.number_input("Carrier amplitude Ac", min_value=0.1, value=1.0, step=0.1)
+            cycles_per_bit = st.slider("Carrier cycles per bit", 2, 30, 10)
+        else:
+            Ac = Ac_default
+            cycles_per_bit = cycles_default
+
+        fc = float(cycles_per_bit) / float(Tb)
+
+        # Show fc only when it matters (Digital → Analog)
+        if mode == "Digital → Analog":
+            st.text_input(
+                "Carrier frequency\nfc = cycles_per_bit / Tb  (Hz)",
+                value=f"{fc:.6g}",
+                disabled=True,
+            )
+
+        params = SimParams(fs=fs, Tb=Tb, samples_per_bit=Ns, Ac=Ac, fc=fc)
 
 
-    st.divider()
+        st.divider()
 
 def summary_block(meta: dict):
     keys = ["scheme", "match", "input_len", "pad_info", "fs", "fc", "Tb", "samples_per_bit"]
@@ -2027,10 +2028,12 @@ elif mode == "Analog → Analog":
         elif scheme == "FM":
             nf = st.slider(
                 "n_f (rad/s per unit amplitude)",
-                0.1, 400.0, float(2 * np.pi * 5.0),
+                20.0, 400.0, float(2 * np.pi * 5.0),
                 step=0.5,
                 key="a2a_nf",
             )
+            if nf < 20:
+                st.warning("Small n_f means weak FM; phase/inst-frequency edge artifacts get amplified by 1/n_f.")
             st.caption("φ'(t) = n_f m(t)  ⇒  ΔF = (n_f A_m)/(2π)")
 
         else:  # PM
@@ -2107,30 +2110,68 @@ elif mode == "Analog → Analog":
         empty_state()
         st.stop()
 
-    # ---- Summary ----
+    # ---- Summary (use the same nice rows as the old expander) ----
     st.subheader("Summary")
-    summ = res.meta.get("summary", {})
 
-    # UI formatting (match how the inputs are shown)
-    a2a_summary_fmt = {
-        "fs": ".0f",
-        "fc": ".2f",
-        "Ac": ".2f",
-        "fm": ".2f",
-        "Am": ".2f",
-        "duration": ".2f",
-        "na": ".2f",
-        "mu": ".2f",
-        "BW_hint_Hz": ".0f",
-        "nf": ".2f",
-        "np": ".2f",
-        "Δf_max_Hz": ".2f",
-        "β": ".3f",
-        "BW_Carson_Hz": ".0f",
-        "Δφ_max_rad": ".3f",
+    rows = {
+        "Scheme": scheme,
+        "Message waveform": str(kind),
+        "Am (message amplitude)": float(Am),
+        "fm (Hz)": float(fm),
+        "Duration (s)": float(duration),
+        "fs (Hz)": float(fs_a),
+        "fc (Hz)": float(fc_a),
+        "Ac (carrier amplitude)": float(Ac_a),
     }
 
-    dict_to_pretty_table(summ, width=700, float_formats=a2a_summary_fmt, default_float_fmt=".6g")
+    if scheme == "AM":
+        am = res.meta.get("am", {})
+        rows.update({
+            "n_a": float(am.get("na", na)),
+            "Modulation index μ (book) = |n_a| (since max|x|=1)": float(am.get("modulation_index_mu", np.nan)),
+            "Bandwidth hint (DSB-LC) ≈ 2·fm (Hz)": float(am.get("bandwidth_hint_hz", np.nan)),
+        })
+
+    elif scheme == "FM":
+        fm_meta = res.meta.get("fm", {})
+        rows.update({
+            "n_f (rad/s per unit)": float(fm_meta.get("nf_rad_per_s_per_unit", nf)),
+            "Max freq deviation ΔF (Hz) = (n_f A_m)/(2π)": float(fm_meta.get("delta_f_max_hz", np.nan)),
+            "FM index β = ΔF/fm": float(fm_meta.get("beta_index", np.nan)),
+            "Carson BW ≈ 2(ΔF + fm) (Hz)": float(fm_meta.get("bw_carson_hz", np.nan)),
+        })
+
+    else:  # PM
+        pm = res.meta.get("pm", {})
+        rows.update({
+            "n_p (rad per unit)": float(pm.get("np_rad_per_unit", np_)),
+            "Max phase dev Δφ (rad) = n_p A_m": float(pm.get("delta_phi_max_rad", np.nan)),
+            "Max freq dev ΔF (Hz, single-tone approx) ≈ n_p A_m f_m": float(pm.get("delta_f_max_hz_sine_approx", np.nan)),
+            "Carson BW ≈ 2(ΔF + fm) (Hz)": float(pm.get("bw_carson_hz_sine_approx", np.nan)),
+        })
+
+    # Formatting (same idea you used before)
+    a2a_pretty_fmt = {
+        "Am (message amplitude)": ".2f",
+        "fm (Hz)": ".2f",
+        "Duration (s)": ".2f",
+        "fs (Hz)": ".0f",
+        "fc (Hz)": ".2f",
+        "Ac (carrier amplitude)": ".2f",
+        "n_a": ".2f",
+        "Modulation index μ (book) = |n_a| (since max|x|=1)": ".2f",
+        "Bandwidth hint (DSB-LC) ≈ 2·fm (Hz)": ".0f",
+        "n_f (rad/s per unit)": ".2f",
+        "Max freq deviation ΔF (Hz) = (n_f A_m)/(2π)": ".2f",
+        "FM index β = ΔF/fm": ".3f",
+        "Carson BW ≈ 2(ΔF + fm) (Hz)": ".0f",
+        "n_p (rad per unit)": ".2f",
+        "Max phase dev Δφ (rad) = n_p A_m": ".3f",
+        "Max freq dev ΔF (Hz, single-tone approx) ≈ n_p A_m f_m": ".2f",
+    }
+
+    dict_to_pretty_table(rows, width=700, float_formats=a2a_pretty_fmt, default_float_fmt=".6g")
+
 
     # Shared X-axis formatting (align plots vertically like in A2D)
     tickvals = list(np.arange(0.0, float(duration) + 1e-9, 0.5))
@@ -2291,53 +2332,6 @@ elif mode == "Analog → Analog":
             },
         )
         
-        # Parameters (expandable)
-        with st.expander("A2A parameters and derived values", expanded=True):
-            rows = [
-                {"Item": "Scheme", "Value": scheme},
-                {"Item": "Message waveform", "Value": str(kind)},
-                {"Item": "Am (message amplitude)", "Value": _fmt(Am)},
-                {"Item": "fm (Hz)", "Value": _fmt(fm)},
-                {"Item": "Duration (s)", "Value": _fmt(duration)},
-                {"Item": "fs (Hz)", "Value": _fmt(fs_a)},
-                {"Item": "fc (Hz)", "Value": _fmt(fc_a)},
-                {"Item": "Ac (carrier amplitude)", "Value": _fmt(Ac_a)},
-            ]
-
-            if scheme == "AM":
-                am = res.meta.get("am", {})
-                rows += [
-                    {"Item": "n_a", "Value": _fmt(am.get("na", na))},
-                    {"Item": "Modulation index μ (book) = |n_a| (since max|x|=1)", "Value": _fmt(am.get("modulation_index_mu", ""))},
-                    {"Item": "Bandwidth hint (DSB-LC) ≈ 2·fm (Hz)", "Value": _fmt(am.get("bandwidth_hint_hz", ""))},
-                ]
-            elif scheme == "FM":
-                fm_meta = res.meta.get("fm", {})
-                rows += [
-                    {"Item": "n_f (rad/s per unit)", "Value": _fmt(fm_meta.get("nf_rad_per_s_per_unit", nf))},
-                    {"Item": "Max freq deviation ΔF (Hz) = (n_f A_m)/(2π)", "Value": _fmt(fm_meta.get("delta_f_max_hz", ""))},
-                    {"Item": "FM index β = ΔF/fm", "Value": _fmt(fm_meta.get("beta_index", ""))},
-                    {"Item": "Carson BW ≈ 2(ΔF + fm) (Hz)", "Value": _fmt(fm_meta.get("bw_carson_hz", ""))},
-                ]
-            else:
-                pm = res.meta.get("pm", {})
-                rows += [
-                    {"Item": "n_p (rad per unit)", "Value": _fmt(pm.get("np_rad_per_unit", np_))},
-                    {"Item": "Max phase dev Δφ (rad) = n_p A_m", "Value": _fmt(pm.get("delta_phi_max_rad", ""))},
-                    {"Item": "Max freq dev ΔF (Hz, single-tone approx) ≈ n_p A_m f_m", "Value": _fmt(pm.get("delta_f_max_hz_sine_approx", ""))},
-                    {"Item": "Carson BW ≈ 2(ΔF + fm) (Hz)", "Value": _fmt(pm.get("bw_carson_hz_sine_approx", ""))},
-                ]
-
-            dfp = pd.DataFrame(rows)
-            st.dataframe(
-                dfp,
-                hide_index=True,
-                width=700,
-                column_config={
-                    "Item": st.column_config.TextColumn("Item", width="medium"),
-                    "Value": st.column_config.TextColumn("Value", width="medium"),
-                },
-            )
         # ---- Debug at end ----
         with st.expander("Full metadata (debug)", expanded=False):
             st.json(res.meta)

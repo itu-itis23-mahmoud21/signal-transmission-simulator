@@ -114,7 +114,7 @@ def _ideal_lowpass_fft(x: np.ndarray, fs: float, cutoff_hz: float, *, pad: int =
 def am_modulate(x_t: np.ndarray, t: np.ndarray, *, Ac: float, fc: float, na: float) -> np.ndarray:
     """
     Book AM (DSBTC / DSB-LC) form:
-      s(t) = Ac * [1 + na * x(t)] * cos(2π f_c t)
+      s(t) = Ac * [1 + na * x(t)] * sin(2π f_c t)
 
     where x(t) is normalized to unit amplitude (max|x| = 1).
     """
@@ -194,8 +194,19 @@ def pm_demodulate_phase(
     Returns: (m_hat, phase_dev)
     """
     pad = max(8, int(round(PAD_CYCLES * fs / max(1.0, fc))))
-    _, phase = _analytic_amp_phase(s_t, pad=pad)
+
+    n = int(s_t.size)
+    pad = max(0, min(int(pad), n - 1))
+
+    if pad > 0:
+        s_pad = np.pad(s_t, (pad, pad), mode="reflect")
+        phase_pad = np.unwrap(np.angle(hilbert(s_pad)))
+        phase = phase_pad[pad:-pad]
+    else:
+        phase = np.unwrap(np.angle(hilbert(s_t)))
+
     phase_dev = phase - 2 * np.pi * float(fc) * t
+
     phase_dev = phase_dev - np.mean(phase_dev)
 
     np_ = float(np_)
@@ -215,9 +226,20 @@ def fm_demodulate_instfreq(
       m_hat(t) = (2π/n_f) * (f_i(t) - f_c)
     Returns: (m_hat, inst_freq)
     """
+    # Compute inst. phase on a padded record, then differentiate, then crop.
     pad = max(8, int(round(PAD_CYCLES * fs / max(1.0, fc))))
-    _, phase = _analytic_amp_phase(s_t, pad=pad)
-    inst_freq = np.gradient(phase) * float(fs) / (2 * np.pi)
+
+    n = int(s_t.size)
+    pad = max(0, min(int(pad), n - 1))
+
+    if pad > 0:
+        s_pad = np.pad(s_t, (pad, pad), mode="reflect")
+        phase_pad = np.unwrap(np.angle(hilbert(s_pad)))
+        inst_freq_pad = np.gradient(phase_pad) * float(fs) / (2 * np.pi)
+        inst_freq = inst_freq_pad[pad:-pad]
+    else:
+        phase = np.unwrap(np.angle(hilbert(s_t)))
+        inst_freq = np.gradient(phase) * float(fs) / (2 * np.pi)
 
     if inst_freq.size >= 2:
         inst_freq[0] = inst_freq[1]
