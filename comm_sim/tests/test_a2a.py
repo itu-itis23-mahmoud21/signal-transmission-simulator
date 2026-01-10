@@ -1,15 +1,60 @@
 # test_a2a.py
 #
-# Analog → Analog (A2A) modulation/demodulation unit tests for `simulate_a2a(...)`.
+# Analog → Analog (A2A) modulation/demodulation unit + stress tests for `simulate_a2a(...)`.
 #
-# Coverage goals (mirrors style of test_d2d/test_d2a/test_a2d):
-#   1) Input validation & error paths
-#   2) Output shape/key invariants + finiteness
-#   3) Book-aligned modulation identities (AM/FM/PM, Stallings Ch.16.1 conventions)
-#   4) Recovery quality in safe (noiseless) regimes for sine/triangle
-#   5) Edge/corner behaviors (duration=0, zero indices, overmodulation flag, parameter sensitivity)
+# What this test suite verifies
+# -----------------------------
+# 1) End-to-end correctness under ideal conditions (core requirement)
+#    - For each supported analog modulation scheme (AM, FM, PM) and each supported
+#      message waveform (sine, triangle), the simulator must:
+#        * produce a valid transmitted waveform s(t)
+#        * recover a baseband message that matches the original in shape (high correlation)
+#      under “clean channel” assumptions (no noise and no channel distortion).
 #
-# NOTE: Long-run stress tests are intentionally omitted for now. A TODO is left at the end.
+# 2) Scheme coverage + waveform coverage
+#    - Schemes: AM (DSB-TC with envelope detection), FM (instantaneous-frequency demod),
+#      PM (phase demod via analytic signal).
+#    - Waveforms: sine, triangle
+#    - Note: square is intentionally disallowed in A2A mode (by design/requirements),
+#      and this behavior is explicitly tested.
+#
+# 3) Output structure / invariants (API contract)
+#    - The returned time axis and all signal arrays must have the correct length N=round(fs·duration).
+#    - Required keys exist in `signals` (common + scheme-specific), metadata includes `summary`,
+#      and all arrays must be finite (no NaN/Inf).
+#    - Padding/cropping behavior is exercised to ensure edge-handling never changes the user-visible length.
+#
+# 4) Book-aligned modulation identities (TX correctness)
+#    - AM: s(t) = Ac (1 + n_a x(t)) cos(2π f_c t), using x(t)=m(t)/m_peak and μ=n_a
+#    - FM: s(t) = Ac cos(2π f_c t + n_f ∫ m(τ)dτ)  (implemented discretely)
+#    - PM: s(t) = Ac cos(2π f_c t + n_p m(t))
+#    - Tests rebuild the same padded record used by the simulator to validate TX identity exactly.
+#
+# 5) Demodulation / recovery quality checks (noiseless regimes)
+#    - AM is expected to recover extremely well with envelope detection for μ<1.
+#    - FM/PM recovery is validated with strong interior-window metrics (guarding edges where appropriate),
+#      plus additional invariants (e.g., inst_freq centered near f_c, phase_dev consistency).
+#
+# 6) Edge cases and invalid-parameter behavior
+#    - Unknown scheme/kind raises
+#    - Non-positive fs/fc/Ac raises; non-positive fm raises; negative duration raises
+#    - duration=0 returns consistent empty arrays
+#    - Zero and tiny indices (n_a, n_f, n_p) must not crash and must remain finite
+#    - Parameter sensitivity sanity (e.g., larger n_f/n_p generally improves FM/PM recovery)
+#
+# 7) Long-run stress tests
+#    - Medium-duration, higher-sample-count runs to catch numerical issues (Hilbert/phase unwrap,
+#      padding/cropping stability), performance regressions, and hidden-state assumptions.
+#    - Includes “hard but realistic” cases:
+#        * longer durations at typical fs
+#        * very low f_c (large pad window)
+#        * near-Nyquist carriers (finite-output requirement)
+#        * repeated-call determinism (no hidden state)
+#
+# How to run
+# ----------
+#   pytest -q comm_sim/tests/test_a2a.py
+
 
 from __future__ import annotations
 
@@ -746,6 +791,135 @@ def test_near_nyquist_carrier_is_finite_even_if_recovery_degrades(scheme):
 
 
 # ----------------------------
-# Long-run stress tests (later)
+# Long-run stress tests
 # ----------------------------
-# TODO: Add long-run stress tests (large fs*duration sweeps) after finalizing baseline correctness and CI budget.
+
+@pytest.mark.parametrize("scheme", ["AM", "FM", "PM"])
+@pytest.mark.parametrize("kind", KINDS)
+def test_long_run_finite_and_lengths(scheme, kind):
+    # Large enough to exercise Hilbert/FFT demods and edge handling,
+    # but not so large that it becomes a stress/soak test.
+    fs = 5000.0
+    fc = 500.0
+    duration = 5.0  # 25k samples
+    params = make_params(fs, fc=fc, Ac=1.0)
+
+    kwargs: Dict[str, float] = {}
+    if scheme == "AM":
+        kwargs["na"] = 0.6
+    elif scheme == "FM":
+        kwargs["nf"] = 2 * np.pi * 100.0
+    else:
+        kwargs["np_"] = 2.0
+
+    res = simulate_a2a(kind, scheme, params, Am=1.0, fm=5.0, duration=duration, **kwargs)
+
+    N = int(round(duration * fs))
+    assert res.t.size == N
+    for name, arr in res.signals.items():
+        assert np.asarray(arr).size == N, f"{scheme}:{kind}:{name} length mismatch"
+        assert_finite(arr, f"{scheme}:{kind}:{name}")
+
+    # Quick sanity on time axis
+    if N > 1:
+        assert np.allclose(np.diff(res.t), 1.0 / fs)
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_long_run_recovery_quality_am(kind):
+    fs = 5000.0
+    fc = 500.0
+    duration = 5.0
+    params = make_params(fs, fc=fc, Ac=1.0)
+
+    res = simulate_a2a(kind, "AM", params, Am=1.0, fm=5.0, duration=duration, na=0.6)
+
+    m = res.signals["m(t)"]
+    m_hat = res.signals["recovered"]
+
+    # AM should be excellent even without guarding
+    nrmse, corr = metrics(m, m_hat, guard_frac=0.0)
+    assert corr > 0.999
+    assert nrmse < 0.03
+
+    # Envelope should not go negative for mu<1
+    assert float(np.min(res.signals["envelope_theory"])) > 0.0
+
+
+@pytest.mark.parametrize("scheme", ["FM", "PM"])
+@pytest.mark.parametrize("kind", KINDS)
+def test_long_run_recovery_quality_fm_pm_midwindow(scheme, kind):
+    fs = 5000.0
+    fc = 500.0
+    duration = 5.0
+    params = make_params(fs, fc=fc, Ac=1.0)
+
+    kwargs = {"nf": 2 * np.pi * 120.0} if scheme == "FM" else {"np_": 2.5}
+    res = simulate_a2a(kind, scheme, params, Am=1.0, fm=5.0, duration=duration, **kwargs)
+
+    m = res.signals["m(t)"]
+    m_hat = res.signals["recovered"]
+
+    # In long windows, edge handling exists; judge on interior.
+    nrmse, corr = metrics(m, m_hat, guard_frac=0.02)
+    assert corr > 0.995
+    assert nrmse < 0.12
+
+
+def test_long_run_low_fc_large_pad_is_stable_all_schemes():
+    # Very low carrier -> very large PAD window; ensures pad/crop logic remains stable.
+    fs = 5000.0
+    fc = 50.0
+    duration = 3.0
+    params = make_params(fs, fc=fc, Ac=1.0)
+
+    # AM
+    res_am = simulate_a2a("sine", "AM", params, Am=1.0, fm=3.0, duration=duration, na=0.6)
+    for name, arr in res_am.signals.items():
+        assert_finite(arr, f"AM low-fc:{name}")
+
+    # FM
+    res_fm = simulate_a2a("sine", "FM", params, Am=1.0, fm=3.0, duration=duration, nf=2*np.pi*120.0)
+    for name, arr in res_fm.signals.items():
+        assert_finite(arr, f"FM low-fc:{name}")
+    # inst_freq should remain bounded (no wild spikes)
+    inst = res_fm.signals["inst_freq"]
+    assert float(np.max(np.abs(inst - fc))) < 5_000.0  # very generous bound
+
+    # PM
+    res_pm = simulate_a2a("sine", "PM", params, Am=1.0, fm=3.0, duration=duration, np_=2.5)
+    for name, arr in res_pm.signals.items():
+        assert_finite(arr, f"PM low-fc:{name}")
+    # phase_dev is mean-centered by design
+    assert abs(float(np.mean(res_pm.signals["phase_dev"]))) < 5e-4
+
+
+def test_long_run_near_nyquist_is_finite_fm_pm():
+    # Larger N near Nyquist to catch any boundary “ringing” or numerical issues over long runs.
+    fs = 3000.0
+    fc = 0.45 * fs
+    duration = 4.0
+    params = make_params(fs, fc=fc, Ac=1.0)
+
+    res_fm = simulate_a2a("triangle", "FM", params, Am=1.0, fm=5.0, duration=duration, nf=2*np.pi*120.0)
+    for name, arr in res_fm.signals.items():
+        assert_finite(arr, f"FM near-nyquist long:{name}")
+
+    res_pm = simulate_a2a("triangle", "PM", params, Am=1.0, fm=5.0, duration=duration, np_=2.5)
+    for name, arr in res_pm.signals.items():
+        assert_finite(arr, f"PM near-nyquist long:{name}")
+
+
+def test_long_run_repeated_calls_are_deterministic_for_same_inputs():
+    # Ensures no hidden state / caching / mutation leaks across calls.
+    fs = 5000.0
+    fc = 500.0
+    duration = 2.0
+    params = make_params(fs, fc=fc, Ac=1.0)
+
+    res1 = simulate_a2a("sine", "FM", params, Am=1.0, fm=5.0, duration=duration, nf=2*np.pi*120.0)
+    res2 = simulate_a2a("sine", "FM", params, Am=1.0, fm=5.0, duration=duration, nf=2*np.pi*120.0)
+
+    # Exact equality should hold for deterministic numpy/scipy pipelines on same machine.
+    for k in ["m(t)", "tx", "inst_freq", "recovered"]:
+        assert np.allclose(res1.signals[k], res2.signals[k], atol=0.0, rtol=0.0)
