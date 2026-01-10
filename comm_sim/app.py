@@ -1180,7 +1180,7 @@ PCM converts each PAM sample into an **n-bit codeword**:
 **Pipeline (book-style):**  
 Analog → PAM sampler → **Quantizer** (L = 2ⁿ levels) → **Encoder** (n-bit blocks) → digital bitstream.
 
-In our implementation (`a2d.py`):
+In our implementation:
 - Sampling is exact (endpoint excluded so we do not create an extra sample at *t = duration*).
 - Quantizer is **uniform** over [−Am, +Am] with **mid-rise reconstruction**.
 - Then we optionally apply **line coding** to the produced bitstream using the same D2D encoder/decoder.  
@@ -1475,7 +1475,7 @@ After PCM/DM produces bits, we transmit them as a digital waveform using **{line
 
     st.markdown(
         """
-> Note: This “line coding” stage is exactly the same family of schemes you study in **Digital → Digital**.
+> Note: This “line coding” stage is exactly the same family of schemes we have in **Digital → Digital**.
 We reuse it here because Stallings explicitly notes that once you have digital data, you can transmit it with a line code.  
         """
     )
