@@ -471,8 +471,8 @@ At the receiver, decoding is done by sampling each bit interval (typically near 
         column_config={
             "Scheme": st.column_config.TextColumn("Scheme", width="small"),
             "Book rule (Table 5.2)": st.column_config.TextColumn("Book rule", width="large"),
-            "Our encoder": st.column_config.TextColumn("Our encoder (d2d.py)", width="large"),
-            "Our decoder": st.column_config.TextColumn("Our decoder (d2d.py)", width="large"),
+            "Our encoder": st.column_config.TextColumn("Our encoder", width="large"),
+            "Our decoder": st.column_config.TextColumn("Our decoder", width="large"),
         },
     )
 
@@ -732,6 +732,318 @@ In the UI, you scale it by **Line amplitude (±A)** so the plotted waveform beco
 - **AMI/Pseudoternary** reduce DC; scrambling is needed to avoid long flat sections.
 - **Manchester-family** is self-clocking but increases transitions (more bandwidth).
 - **B8ZS/HDB3** keep AMI’s advantages while preventing long sequences of 0 line signal.
+        """
+    )
+
+def render_d2a_theory(
+    *,
+    params: SimParams,
+    show_grid: bool,
+    scheme_selected: str,
+    kwargs_selected: dict,
+) -> None:
+    """Render the beginner-friendly Theory tab for Digital → Analog (D2A)."""
+
+    st.markdown(
+        """
+## Digital → Analog (Modems): what’s happening?
+
+We start with **digital bits** (0/1) and turn them into a **bandpass analog waveform** by modulating a **carrier**:
+
+- Carrier: **cos(2π f_c t)** at frequency **f_c**
+- Each bit lasts **T_b** seconds and uses **N_s** samples  
+  ⇒ **f_s = N_s / T_b**
+
+In the book, the big three modulation families are:
+**ASK** (amplitude), **FSK** (frequency), **PSK** (phase).  
+In our simulator we also include multilevel variants (**MFSK**, **QPSK**, **QAM/16-QAM**).
+        """
+    )
+
+    # ------------------------------------------------------------------
+    # 1) “Book ↔ our code” mapping
+    # ------------------------------------------------------------------
+    st.markdown("### Book definitions → how our code implements them")
+    st.markdown(
+        """
+Below, “**TX**” = waveform generation, and “**RX**” = how we recover bits.
+
+Our receiver is **coherent**: it correlates the received segment against local
+**cos/sin references** (I/Q correlator), then decides by amplitude/energy/phase.
+        """
+    )
+
+    rows = [
+        {
+            "Scheme": "ASK",
+            "Book idea": "Two amplitudes for 0/1 (often 0 vs A) — Eq (5.2)",
+            "Our TX": "s(t) = Ac·A(bit)·cos(2π f_c t) using A0/A1",
+            "Our RX": "I/Q at f_c → magnitude Â → threshold at (A0+A1)/2",
+        },
+        {
+            "Scheme": "BFSK",
+            "Book idea": "Two tones for 0/1 — Eq (5.3)",
+            "Our TX": "bit selects f0 or f1 (UI uses explicit f0,f1)",
+            "Our RX": "Energy at f0 vs f1 via I/Q → pick larger energy",
+        },
+        {
+            "Scheme": "MFSK",
+            "Book idea": "M tones; each symbol carries L=log2(M) bits — Eq (5.4)",
+            "Our TX": "Group bits by L → choose tone index → transmit that tone",
+            "Our RX": "Energy over all tones → argmax tone index → map back to L bits",
+        },
+        {
+            "Scheme": "BPSK",
+            "Book idea": "Two phases (0 and π) ≡ ±cos — Eq (5.5)/(5.6)",
+            "Our TX": "bit picks φ1 or φ0 (defaults: 0 and π)",
+            "Our RX": "Estimate phase via I/Q → choose closer of φ1 vs φ0",
+        },
+        {
+            "Scheme": "DPSK",
+            "Book idea": "Bit encodes phase change vs previous burst — Fig 5.10",
+            "Our TX": "Keep running phase; bit=1 adds Δφ (default π), bit=0 keeps phase",
+            "Our RX": "Estimate φ per bit → Δφ vs previous → decide 0/1",
+        },
+        {
+            "Scheme": "QPSK",
+            "Book idea": "2 bits/symbol; 4 phases — Eq (5.7), Fig 5.11",
+            "Our TX": "Split into I/Q; s(t)=(Ac/√2)(I·cos − Q·sin) with φ_ref",
+            "Our RX": "Correlate → recover I,Q signs → map back to 2 bits",
+        },
+        {
+            "Scheme": "QAM",
+            "Book idea": "Two ASK signals on orthogonal carriers — Fig 5.14; 16-QAM — Fig 5.15",
+            "Our TX": "axis_levels=2 → 4-QAM; axis_levels=4 → 16-QAM (Gray per axis)",
+            "Our RX": "Correlate → estimate I,Q → slice to valid levels → bits",
+        },
+    ]
+    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+
+    # ------------------------------------------------------------------
+    # 2) Beginner-friendly explanations
+    # ------------------------------------------------------------------
+    st.markdown("---")
+    st.markdown("## 1) ASK — Amplitude Shift Keying")
+    st.markdown(
+        """
+**Idea:** keep the carrier frequency fixed, but change **amplitude** based on the bit.
+
+- Book Eq (5.2): one bit uses **A cos(2π f_c t)**, the other uses **0** (or a smaller amplitude).
+- In our UI you choose **A0** and **A1** (often A0=0).
+
+**RX decision in our code:** correlate at **f_c**, compute magnitude **Â ≈ √(I²+Q²)/Ac**, then compare to **(A0+A1)/2**.
+        """
+    )
+
+    st.markdown("## 2) FSK — Frequency Shift Keying (BFSK, MFSK)")
+    st.markdown(
+        """
+**BFSK:** bit 0 and bit 1 are two different tones near the carrier (Eq 5.3).  
+**MFSK:** extend that: each symbol chooses **one of M tones** and carries **L=log2(M)** bits (Eq 5.4).
+
+In our implementation:
+- **BFSK:** UI provides **f0/f1** explicitly (and RX uses the same two tones).
+- **MFSK:** you choose **L** and **fd** (Hz). We compute the tone set:
+  **f_i = f_c + (2i − 1 − M) f_d**, for i=1..M.
+
+**RX decision:** compute energy at each candidate frequency with I/Q correlation, then choose the maximum.
+        """
+    )
+
+    st.markdown("## 3) PSK — Phase Shift Keying (BPSK, DPSK, QPSK)")
+    st.markdown(
+        """
+**BPSK:** the carrier phase flips between two values (usually 0 and π).  
+Equivalent viewpoint: multiply the carrier by **+1** or **−1** (Eq 5.6).
+
+**DPSK:** instead of absolute phase, the bit is encoded in the **change relative to the previous bit**
+(Fig 5.10):  
+- 0 = same phase  
+- 1 = opposite phase (default Δφ=π)
+
+**QPSK:** group bits into pairs → 4 phases (Eq 5.7).  
+Book structure (Fig 5.11): split into **I** and **Q** streams (alternate bits), modulate cos & sin, and add.
+        """
+    )
+
+    st.markdown("## 4) QAM — Quadrature Amplitude Modulation")
+    st.markdown(
+        """
+**QAM = two ASK signals on orthogonal carriers**: one on **cos(2π f_c t)** and one on **sin(2π f_c t)** (Fig 5.14).
+
+In our simulator:
+- **axis_levels=2** → 4 states (often called 4-QAM)
+- **axis_levels=4** → 16 states (16-QAM, Fig 5.15) using Gray coding per axis.
+        """
+    )
+
+    # ------------------------------------------------------------------
+    # 3) Constellations (QPSK + 16-QAM)
+    # ------------------------------------------------------------------
+    st.markdown("---")
+    st.markdown("## Constellations (I–Q plane)")
+
+    colA, colB = st.columns(2)
+
+    with colA:
+        st.markdown("### QPSK (our mapping)")
+        qpsk_points = [
+            ("11", +1, +1),
+            ("01", -1, +1),
+            ("00", -1, -1),
+            ("10", +1, -1),
+        ]
+        fig = go.Figure()
+        fig.add_trace(
+            go.Scatter(
+                x=[p[1] for p in qpsk_points],
+                y=[p[2] for p in qpsk_points],
+                mode="markers+text",
+                text=[p[0] for p in qpsk_points],
+                textposition="top center",
+            )
+        )
+        fig.update_layout(
+            xaxis_title="I",
+            yaxis_title="Q",
+            xaxis=dict(zeroline=True),
+            yaxis=dict(zeroline=True),
+            height=320,
+            margin=dict(l=10, r=10, t=30, b=10),
+        )
+        st.plotly_chart(fig, width="stretch")
+
+    with colB:
+        st.markdown("### 16-QAM (Gray per axis)")
+        axis_map = {"00": -3, "01": -1, "11": +1, "10": +3}
+        pts = [(f"{ib}{qb}", I, Q) for ib, I in axis_map.items() for qb, Q in axis_map.items()]
+        fig2 = go.Figure()
+        fig2.add_trace(
+            go.Scatter(
+                x=[p[1] for p in pts],
+                y=[p[2] for p in pts],
+                mode="markers",
+            )
+        )
+        fig2.update_layout(
+            xaxis_title="I level",
+            yaxis_title="Q level",
+            xaxis=dict(zeroline=True),
+            yaxis=dict(zeroline=True),
+            height=320,
+            margin=dict(l=10, r=10, t=30, b=10),
+        )
+        st.plotly_chart(fig2, width="stretch")
+
+    # ------------------------------------------------------------------
+    # 4) Visual example (SAME note/assumption style as Waveforms compare)
+    # ------------------------------------------------------------------
+    st.markdown("---")
+    st.markdown("## Visual example: same input bits modulated with each scheme")
+
+    example_bits = [0, 1, 0, 0, 1, 1, 0, 0, 0, 1, 1]
+    st.caption("Using the common textbook example bit sequence: 01001100011")
+
+    # Match the Waveforms-tab compare list (including the SAME notes)
+    compare_items = [
+        {
+            "title": "ASK",
+            "scheme": "ASK",
+            "defaults": {"A0": 0.00, "A1": 1.00},
+            "note": "A0 = 0.00, A1 = 1.00",
+        },
+        {
+            "title": "BFSK",
+            "scheme": "BFSK",
+            "defaults": {"f0": 8.00, "f1": 12.00},
+            "note": "f0 = 8.00 Hz, f1 = 12.00 Hz",
+        },
+        {
+            "title": "MFSK",
+            "scheme": "MFSK",
+            "defaults": {"L": 2, "fd": 1.00},
+            "note": "L = 2 (M = 4), fd = 1.00 Hz",
+        },
+        {
+            "title": "BPSK",
+            "scheme": "BPSK",
+            "defaults": {"phase1": 0.0, "phase0": float(np.pi)},
+            "note": "Standard 'φ1 = 0.00 rad, φ0 = π rad'",
+        },
+        {
+            "title": "DPSK",
+            "scheme": "DPSK",
+            "defaults": {"phase_init": 0.0, "delta_phase": float(np.pi)},
+            "note": "φ_ref = 0.00 rad, Δφ = π rad",
+        },
+        {
+            "title": "QPSK",
+            "scheme": "QPSK",
+            "defaults": {"phi_ref": 0.0},
+            "note": "φ_ref = 0.00 rad",
+        },
+        {
+            "title": "QAM (2-level ASK)",
+            "scheme": "QAM",
+            "axis_levels": 2,
+            "defaults": {"axis_levels": 2, "phi_ref": 0.0},
+            "note": "2-level ASK (axis_levels = 2), φ_ref = 0.00 rad",
+        },
+        {
+            "title": "16-QAM (4-level ASK)",
+            "scheme": "QAM",
+            "axis_levels": 4,
+            "defaults": {"axis_levels": 4, "phi_ref": 0.0},
+            "note": "4-level ASK (axis_levels = 4), φ_ref = 0.00 rad",
+        },
+    ]
+
+    scheme_selected_u = str(scheme_selected).upper()
+    cur_axis_levels = None
+    if scheme_selected_u == "QAM":
+        try:
+            cur_axis_levels = int(kwargs_selected.get("axis_levels"))
+        except Exception:
+            cur_axis_levels = None
+
+    def _is_selected(item: dict) -> bool:
+        if str(item["scheme"]).upper() != scheme_selected_u:
+            return False
+        if scheme_selected_u != "QAM":
+            return True
+        return cur_axis_levels is not None and cur_axis_levels == int(item.get("axis_levels", -1))
+
+    cols = st.columns(2)
+    for idx, item in enumerate(compare_items):
+        selected = _is_selected(item)
+
+        kwargs_use = dict(kwargs_selected) if selected else dict(item["defaults"])
+        res2 = simulate_d2a(example_bits, item["scheme"], params, **kwargs_use)
+
+        if selected:
+            title = item["title"]
+        else:
+            title = (
+                f"{item['title']}  "
+                f"<span style='font-size:0.80em; opacity:0.8'>({item['note']})</span>"
+            )
+
+        with cols[idx % 2]:
+            st.plotly_chart(
+                plot_signal(res2.t, res2.signals["tx"], title, grid=show_grid, x_dtick=params.Tb),
+                width="stretch",
+            )
+
+    st.markdown("---")
+    st.markdown(
+        """
+## Key takeaways
+
+- **ASK** is simplest, but amplitude noise/gain changes can hurt it.
+- **FSK** is typically more robust than ASK; **MFSK** trades **more bandwidth** for better separation.
+- **PSK** is usually more bandwidth-efficient than ASK/FSK; **DPSK** avoids strict absolute phase reference.
+- **QPSK/QAM** pack more bits per symbol (higher bandwidth efficiency), but require cleaner channels
+  because constellation points are closer.
         """
     )
 
@@ -1661,9 +1973,9 @@ elif mode == "Digital → Analog":
     else:
         summary_block({**res.meta, "fs": params.fs, "fc": params.fc, "Tb": params.Tb, "samples_per_bit": params.samples_per_bit})
 
-        tab1, tab3, tab4 = st.tabs(["Waveforms", "Steps", "Details"])
+        tab_wave, tab_steps, tab_details, tab_theory = st.tabs(["Waveforms", "Steps", "Details", "Theory"])
 
-        with tab1:
+        with tab_wave:
             inp = res.bits["input"]
             t_bits = np.arange(len(inp)*Ns) / params.fs
             x_bits = bits_to_step(inp, Ns)
@@ -1790,7 +2102,7 @@ elif mode == "Digital → Analog":
                             width="stretch",
                         )
 
-        with tab3:
+        with tab_steps:
             dem = res.meta.get("demodulate", {})
 
             if isinstance(dem, dict):
@@ -1967,7 +2279,7 @@ elif mode == "Digital → Analog":
             else:
                 st.write(dem)
             
-        with tab4:
+        with tab_details:
             st.write("Input bits:")
             st.code(bits_to_string(res.bits["input"]))
 
@@ -1979,6 +2291,15 @@ elif mode == "Digital → Analog":
                 st.success("MATCH")
             else:
                 st.error("MISMATCH")
+        
+        with tab_theory:
+            render_d2a_theory(
+                params=params,
+                show_grid=show_grid,
+                scheme_selected=scheme,
+                kwargs_selected=kwargs,
+            )
+            
 
 elif mode == "Analog → Digital":
     with st.sidebar:
