@@ -57,6 +57,8 @@
 
 from __future__ import annotations
 
+import os
+import sys
 import random
 from typing import Dict, List, Any
 
@@ -64,8 +66,45 @@ import numpy as np
 import pytest
 
 from utils import SimParams
-from d2a import simulate_d2a
 
+
+# ==========================================
+# Dynamic Import Logic (Environment Switch)
+# ==========================================
+test_target = os.getenv("TEST_TARGET", "original")
+
+if test_target == "optimized":
+    # 1. Resolve path relative to THIS test file
+    current_test_dir = os.path.dirname(os.path.abspath(__file__))     # .../comm_sim/tests
+    project_root = os.path.dirname(current_test_dir)                  # .../comm_sim
+    optimized_folder = os.path.join(project_root, "gemini_optimized") # .../comm_sim/gemini_optimized
+
+    print(f"\n>>> TARGET MODE: Optimized")
+
+    # 2. Add to system path
+    if optimized_folder not in sys.path:
+        sys.path.insert(0, optimized_folder)
+
+    # 3. Import with fallback for the typo
+    try:
+        from d2a_gemini_optimized import simulate_d2a
+    except ImportError:
+        try:
+            # Fallback for the file on your disk
+            from d2a_gemini_optmizied import simulate_d2a
+            print(">>> NOTE: Imported 'd2a_gemini_optmizied.py' (detected filename typo on disk)")
+        except ImportError as e:
+            sys.exit(f"CRITICAL ERROR: Could not import optimized file.\nChecked path: {optimized_folder}\nError: {e}")
+
+else:
+    print("\n>>> TARGET MODE: Original (d2a.py) <<<\n")
+    try:
+        from d2a import simulate_d2a
+    except ImportError:
+         sys.exit("CRITICAL ERROR: Could not import 'd2a.py'. Ensure 'comm_sim' is in your Python path.")
+
+# DEBUG: Verify exactly which file is loaded
+print(f"DEBUG: simulate_d2a is loaded from: {simulate_d2a.__code__.co_filename}\n")
 
 # -------------------------
 # Shared utilities / helpers

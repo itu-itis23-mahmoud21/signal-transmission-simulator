@@ -67,6 +67,8 @@ from typing import Dict, List
 import numpy as np
 import pytest
 
+from utils import SimParams
+
 # ==========================================
 # Dynamic Import Logic (Environment Switch)
 # ==========================================
@@ -104,9 +106,6 @@ else:
 
 # DEBUG: Verify exactly which file is loaded
 print(f"DEBUG: simulate_d2d is loaded from: {simulate_d2d.__code__.co_filename}\n")
-
-# --- OTHER IMPORTS ---
-from utils import SimParams
 
 
 # =========================
