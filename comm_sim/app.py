@@ -904,10 +904,10 @@ In our simulator:
             )
         )
         fig.update_layout(
-            xaxis_title="I",
-            yaxis_title="Q",
-            xaxis=dict(zeroline=True),
-            yaxis=dict(zeroline=True),
+            xaxis_title="I level",
+            yaxis_title="Q level",
+            xaxis=dict(zeroline=True, range=[-1.1, 1.1]),
+            yaxis=dict(zeroline=True, range=[-1.1, 1.2]),
             height=320,
             margin=dict(l=10, r=10, t=30, b=10),
         )
@@ -2299,7 +2299,7 @@ elif mode == "Digital → Analog":
                 scheme_selected=scheme,
                 kwargs_selected=kwargs,
             )
-            
+
 
 elif mode == "Analog → Digital":
     with st.sidebar:
