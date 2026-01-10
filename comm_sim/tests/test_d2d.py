@@ -67,35 +67,29 @@ from typing import Dict, List
 import numpy as np
 import pytest
 
-from utils import SimParams
-
-
 # ==========================================
 # Dynamic Import Logic (Environment Switch)
 # ==========================================
-# Read environment variable 'TEST_TARGET' (defaults to 'original' if not set)
 test_target = os.getenv("TEST_TARGET", "original")
 
 if test_target == "optimized":
-    # 1. Resolve path relative to THIS test file (comm_sim/tests/test_d2d.py)
-    #    We want to go up one level (..), then into 'gemini_optimized'
-    current_test_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(current_test_dir)  # This is 'comm_sim'
-    optimized_folder = os.path.join(project_root, "gemini_optimized")
+    # 1. Resolve path relative to THIS test file
+    current_test_dir = os.path.dirname(os.path.abspath(__file__))     # .../comm_sim/tests
+    project_root = os.path.dirname(current_test_dir)                  # .../comm_sim
+    optimized_folder = os.path.join(project_root, "gemini_optimized") # .../comm_sim/gemini_optimized
 
-    print(f"\n>>> TARGET MODE: Optimized <<<")
+    print(f"\n>>> TARGET MODE: Optimized")
 
-    # 2. Add to system path to allow direct import
+    # 2. Add to system path
     if optimized_folder not in sys.path:
         sys.path.insert(0, optimized_folder)
 
-    # 3. Import with fallback for the typo in the filename
+    # 3. Import with fallback for the typo
     try:
-        # Try the correct spelling first
         from d2d_gemini_optimized import simulate_d2d
     except ImportError:
         try:
-            # Fallback: The file in your upload has a typo ("optmizied")
+            # Fallback for the file on your disk
             from d2d_gemini_optmizied import simulate_d2d
             print(">>> NOTE: Imported 'd2d_gemini_optmizied.py' (detected filename typo on disk)")
         except ImportError as e:
@@ -106,7 +100,13 @@ else:
     try:
         from d2d import simulate_d2d
     except ImportError:
-         sys.exit("CRITICAL ERROR: Could not import 'd2d.py'. Ensure 'comm_sim' is in your Python path or pytest.ini.")
+         sys.exit("CRITICAL ERROR: Could not import 'd2d.py'. Ensure 'comm_sim' is in your Python path.")
+
+# DEBUG: Verify exactly which file is loaded
+print(f"DEBUG: simulate_d2d is loaded from: {simulate_d2d.__code__.co_filename}\n")
+
+# --- OTHER IMPORTS ---
+from utils import SimParams
 
 
 # =========================
