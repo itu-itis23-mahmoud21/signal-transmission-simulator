@@ -106,9 +106,6 @@ def modulate(bits: List[int], scheme: str, params: SimParams, **kwargs) -> Tuple
     bits_arr = np.array(bits, dtype=int)
     N_bits = len(bits_arr)
 
-    # Pre-calculate time axis (will be reshaped/sliced as needed)
-    # Note: Some schemes pad bits, changing N. 
-    
     if scheme == "ASK":
         A0 = float(kwargs.get("A0", 0.2))
         A1 = float(kwargs.get("A1", 1.0))
@@ -133,6 +130,9 @@ def modulate(bits: List[int], scheme: str, params: SimParams, **kwargs) -> Tuple
             f0 = float(kwargs["f0"])
             f1 = float(kwargs["f1"])
             tone_sep = None
+            # Ensure canonical order f0 < f1 per test expectation
+            if f1 < f0:
+                f0, f1 = f1, f0
         else:
             Tb = float(params.Tb)
             tone_sep = float(kwargs.get("tone_sep", 2.0))
@@ -149,9 +149,6 @@ def modulate(bits: List[int], scheme: str, params: SimParams, **kwargs) -> Tuple
         freqs_full = np.repeat(freqs, Ns)
         
         t = make_time_axis(len(freqs_full), fs)
-        # Phase continuity is automatic when using global time t with instantaneous freq?
-        # Standard FSK: cos(2*pi*f_i*t). 
-        # Note: This matches the original implementation which calculates cos(2*pi*f*seg_t) where seg_t slices global t.
         s = Ac * np.cos(2 * np.pi * freqs_full * t)
 
         meta.update({
@@ -175,21 +172,16 @@ def modulate(bits: List[int], scheme: str, params: SimParams, **kwargs) -> Tuple
         sym_rows = bits_arr.reshape(num_sym, L)
         
         # Convert binary rows to integer indices
-        # Powers of 2: [2^(L-1), ..., 2^0]
         powers = 2 ** np.arange(L - 1, -1, -1)
         sym_indices = sym_rows.dot(powers)
         
         # Frequencies
-        # f_i = fc + (2i - 1 - M) * fd
         freq_lut = fc + (2 * (np.arange(M) + 1) - 1 - M) * fd
         
         # Map indices to frequencies
         chosen_freqs = freq_lut[sym_indices]
         warnings += _warn_params(params, extra_freqs=freq_lut.tolist())
         
-        # Expand: MFSK symbol duration is L * Ns (actually Ns is usually samples per bit, 
-        # but utils.py SimParams says samples_per_bit. 
-        # Original code: Ns_sym = L * Ns.
         Ns_sym = L * Ns
         freqs_full = np.repeat(chosen_freqs, Ns_sym)
         
@@ -226,9 +218,7 @@ def modulate(bits: List[int], scheme: str, params: SimParams, **kwargs) -> Tuple
         delta_phase = float(kwargs.get("delta_phase", np.pi))
 
         # Differential encoding
-        # bit 1 -> add delta, bit 0 -> add 0
         phase_changes = np.where(bits_arr == 1, delta_phase, 0.0)
-        # Cumulative sum + initial
         phases = np.cumsum(phase_changes) + phase_init
         
         phases_full = np.repeat(phases, Ns)
@@ -248,12 +238,6 @@ def modulate(bits: List[int], scheme: str, params: SimParams, **kwargs) -> Tuple
         num_sym = len(bits_arr) // 2
         sym_rows = bits_arr.reshape(num_sym, 2)
         
-        # 00->(-1,-1), 01->(-1,1), 10->(1,-1), 11->(1,1)
-        # QPSK Map Logic:
-        # bit0 maps to I sign: 0-> -1, 1-> +1? 
-        # Original MAP: (1,1)->(1,1), (0,1)->(-1,1), (0,0)->(-1,-1), (1,0)->(1,-1)
-        # So b0 -> I sign (0->-1, 1->1), b1 -> Q sign (0->-1, 1->1)
-        
         b0 = sym_rows[:, 0]
         b1 = sym_rows[:, 1]
         I_vals = np.where(b0 == 1, 1.0, -1.0)
@@ -271,10 +255,8 @@ def modulate(bits: List[int], scheme: str, params: SimParams, **kwargs) -> Tuple
         c = np.cos(arg)
         sn = np.sin(arg)
         
-        # s(t) = (Ac/sqrt(2)) * (I*c - Q*s)
         s = (Ac / np.sqrt(2.0)) * (I_full * c - Q_full * sn)
 
-        # Convert sym_bits to list of tuples for meta
         sym_bits_list = [tuple(r) for r in sym_rows.tolist()]
         
         meta.update({
@@ -286,6 +268,12 @@ def modulate(bits: List[int], scheme: str, params: SimParams, **kwargs) -> Tuple
 
     if scheme == "QAM":
         axis_levels = int(kwargs.get("axis_levels", 2))
+        
+        # --- FIX: explicit validation to pass tests ---
+        if axis_levels not in (2, 4):
+            raise ValueError(f"QAM axis_levels must be 2 or 4, got {axis_levels}")
+        # ---------------------------------------------
+        
         phi_ref = float(kwargs.get("phi_ref", 0.0))
         warnings += _warn_params(params, extra_freqs=[])
 
@@ -295,35 +283,25 @@ def modulate(bits: List[int], scheme: str, params: SimParams, **kwargs) -> Tuple
         bits_list, pad = _pad_bits(bits, bits_per_symbol)
         bits_arr = np.array(bits_list, dtype=int)
         
-        # Interleave logic in original: [I0, Q0, I1, Q1]
-        # I stream = 0::2, Q stream = 1::2
         I_stream = bits_arr[0::2]
         Q_stream = bits_arr[1::2]
         
         num_sym = len(I_stream) // bits_per_axis
         
-        # Reshape to (num_sym, bits_per_axis)
         I_bits_mat = I_stream.reshape(num_sym, bits_per_axis)
         Q_bits_mat = Q_stream.reshape(num_sym, bits_per_axis)
         
         if axis_levels == 2:
             # 1 bit per axis. 0->-1, 1->1
-            # I_bits_mat is (num_sym, 1)
             I_vals = np.where(I_bits_mat[:, 0] == 1, 1.0, -1.0)
             Q_vals = np.where(Q_bits_mat[:, 0] == 1, 1.0, -1.0)
             norm = 1.0
         else:
             # 2 bits per axis (16-QAM). 
-            # Map: 00->-3, 01->-1, 11->+1, 10->+3
-            # Powers logic: b0*2 + b1. 
-            # 00(0)->-3, 01(1)->-1, 10(2)->+3, 11(3)->+1
-            # Let's make a LUT for index 0..3
-            # Index = b0*2 + b1
             powers = np.array([2, 1])
             I_idx = I_bits_mat.dot(powers)
             Q_idx = Q_bits_mat.dot(powers)
             
-            # Map: 0->-3, 1->-1, 2->3, 3->1
             lut = np.array([-3.0, -1.0, 3.0, 1.0])
             I_vals = lut[I_idx]
             Q_vals = lut[Q_idx]
@@ -340,13 +318,8 @@ def modulate(bits: List[int], scheme: str, params: SimParams, **kwargs) -> Tuple
         
         s = Ac * ((I_full / norm) * c + (Q_full / norm) * sn)
         
-        # Reconstruct symbol bits interleaved for meta
-        # Stack I and Q bits back: I0, Q0, I1, Q1...
-        # Easy way: reshape I_bits_mat and Q_bits_mat to flat, then stack
-        # This is strictly for metadata visual matching
         sym_bits_interleaved = []
         for k in range(num_sym):
-             # Original loop logic reconstruction
              chunk = []
              for j in range(bits_per_axis):
                  chunk.append(int(I_bits_mat[k, j]))
@@ -364,15 +337,12 @@ def modulate(bits: List[int], scheme: str, params: SimParams, **kwargs) -> Tuple
         return s, meta
 
     if scheme == "16QAM":
-        # 16-QAM specific (same as QAM axis_levels=4 but simplified input)
-        # Original: Quad bits [b0, b1, b2, b3] -> I=[b0,b1], Q=[b2,b3]
         bits_list, pad = _pad_bits(bits, 4)
         bits_arr = np.array(bits_list, dtype=int)
         
         num_sym = len(bits_arr) // 4
         sym_rows = bits_arr.reshape(num_sym, 4)
         
-        # I bits: cols 0,1. Q bits: cols 2,3
         powers = np.array([2, 1])
         I_idx = sym_rows[:, 0:2].dot(powers)
         Q_idx = sym_rows[:, 2:4].dot(powers)
@@ -430,11 +400,7 @@ def demodulate(s_t: np.ndarray, scheme: str, params: SimParams, **kwargs) -> Tup
         thr = 0.5 * (A0 + A1)
         warnings += _warn_params(params, extra_freqs=[])
         
-        # Correlate per bit period
-        # ASK uses coherent detection with fc
         I_corr, Q_corr = _vec_iq_correlator(s_t, t, fc, Ns)
-        
-        # Amplitude estimate
         A_est = np.sqrt(I_corr**2 + Q_corr**2) / (Ac if Ac != 0 else 1.0)
         
         bits_out = np.where(A_est >= thr, 1, 0)
@@ -447,16 +413,19 @@ def demodulate(s_t: np.ndarray, scheme: str, params: SimParams, **kwargs) -> Tup
         if "f0" in kwargs and "f1" in kwargs:
             f0, f1 = float(kwargs["f0"]), float(kwargs["f1"])
             tone_sep = None
+            # Ensure canonical order f0 < f1 to match Modulator
+            if f1 < f0:
+                f0, f1 = f1, f0
         else:
             Tb = float(params.Tb)
             tone_sep = float(kwargs.get("tone_sep", 2.0))
             f0 = fc - tone_sep / Tb
             f1 = fc + tone_sep / Tb
-        if f1 < f0: f0, f1 = f1, f0
+            if f1 < f0: f0, f1 = f1, f0
+        
         warnings += _warn_params(params, extra_freqs=[f0, f1])
 
         # Correlate with f0 and f1 separately
-        # Note: Since frequencies differ, we must call correlator twice
         I0, Q0 = _vec_iq_correlator(s_t, t, f0, Ns)
         E0 = I0**2 + Q0**2
         
@@ -480,23 +449,14 @@ def demodulate(s_t: np.ndarray, scheme: str, params: SimParams, **kwargs) -> Tup
         freqs = [fc + (2 * (i + 1) - 1 - M) * fd for i in range(M)]
         warnings += _warn_params(params, extra_freqs=freqs)
         
-        # Matrix of Energies: (num_sym, M)
-        # We need to correlate s_t with M different frequencies.
-        # Calling vec_iq_correlator M times is efficient enough compared to Python loops
-        
         E_matrix = []
         for f in freqs:
             I, Q = _vec_iq_correlator(s_t, t, float(f), Ns_sym)
             E_matrix.append(I**2 + Q**2)
         
-        E_matrix = np.column_stack(E_matrix) # (num_sym, M)
+        E_matrix = np.column_stack(E_matrix)
         chosen_idx = np.argmax(E_matrix, axis=1)
         
-        # Convert indices back to bits
-        # e.g., idx 3 (binary 11) -> [1, 1]
-        # We need a bit-expansion for each index.
-        # Shape: (num_sym, L)
-        # Shift: chosen_idx >> shift & 1
         shifts = np.arange(L - 1, -1, -1)
         bits_mat = (chosen_idx[:, None] >> shifts) & 1
         bits_out = bits_mat.flatten()
@@ -515,17 +475,10 @@ def demodulate(s_t: np.ndarray, scheme: str, params: SimParams, **kwargs) -> Tup
         
         I_corr, Q_corr = _vec_iq_correlator(s_t, t, fc, Ns)
         
-        # Normalize
         I_hat = I_corr / (Ac if Ac != 0 else 1.0)
-        Q_hat = Q_corr / (Ac if Ac != 0 else 1.0)
         
-        # Detect Phase
-        # Note: arctan2(y, x). The original code uses (-Q, I) for phase calc.
-        # Let's match that convention: np.arctan2(-Q, I)
         phi = np.arctan2(-Q_corr, I_corr)
         
-        # Angular distance
-        # shortest dist on circle: (a-b+pi)%(2pi) - pi
         def _vec_ang_dist(a, b):
             return np.abs((a - b + np.pi) % (2 * np.pi) - np.pi)
             
@@ -547,15 +500,11 @@ def demodulate(s_t: np.ndarray, scheme: str, params: SimParams, **kwargs) -> Tup
         
         phi_hat = np.arctan2(-Q_corr, I_corr)
         
-        # Differential logic: compare phi[i] with phi[i-1]
-        # Prepend phase_init
         prev_phis = np.r_[phase_init, phi_hat[:-1]]
-        
         dphi = (phi_hat - prev_phis + np.pi) % (2 * np.pi) - np.pi
         
-        # Decision
         dist_change = np.abs(np.abs(dphi) - np.abs(delta_phase))
-        dist_same = np.abs(dphi) # Distance from 0 change
+        dist_same = np.abs(dphi)
         
         bits_out = np.where(dist_change < dist_same, 1, 0)
         
@@ -571,15 +520,8 @@ def demodulate(s_t: np.ndarray, scheme: str, params: SimParams, **kwargs) -> Tup
         Ns_sym = 2 * Ns
         warnings += _warn_params(params, extra_freqs=[])
         
-        # QPSK correlator requires projection onto cos(wt+phi) and sin(wt+phi)
-        # Our generic correlator uses cos(wt)/sin(wt)
-        # s_t * cos(wt+phi) = s_t * (cos*cphi - sin*sphi)
-        # So we can mix the outputs of generic correlator?
-        # Simpler: just implement the specialized correlator inline for QPSK to match exactly.
-        
         num_sym = len(s_t) // Ns_sym
         
-        # Reference signals
         arg = 2 * np.pi * fc * t + phi_ref
         c = np.cos(arg)
         sn = np.sin(arg)
@@ -594,9 +536,6 @@ def demodulate(s_t: np.ndarray, scheme: str, params: SimParams, **kwargs) -> Tup
         I_sym = I_ints * np.sqrt(2.0) / den
         Q_sym = -Q_ints * np.sqrt(2.0) / den
         
-        # Decisions: I>0 -> 1, I<0 -> 0 (based on inverse map)
-        # Map: (+1,+1)->(1,1), (-1,+1)->(0,1), (-1,-1)->(0,0), (+1,-1)->(1,0)
-        # So b0 = (I>0), b1 = (Q>0)
         b0 = np.where(I_sym >= 0, 1, 0)
         b1 = np.where(Q_sym >= 0, 1, 0)
         
@@ -611,6 +550,12 @@ def demodulate(s_t: np.ndarray, scheme: str, params: SimParams, **kwargs) -> Tup
 
     if scheme == "QAM":
         axis_levels = int(kwargs.get("axis_levels", 2))
+        
+        # --- FIX: explicit validation to pass tests ---
+        if axis_levels not in (2, 4):
+            raise ValueError(f"QAM axis_levels must be 2 or 4, got {axis_levels}")
+        # ---------------------------------------------
+        
         phi_ref = float(kwargs.get("phi_ref", 0.0))
         norm = 1.0 if axis_levels == 2 else 3.0
         
@@ -619,7 +564,6 @@ def demodulate(s_t: np.ndarray, scheme: str, params: SimParams, **kwargs) -> Tup
         num_sym = len(s_t) // Ns_sym
         warnings += _warn_params(params, extra_freqs=[])
         
-        # Correlate
         arg = 2 * np.pi * fc * t + phi_ref
         c = np.cos(arg)
         sn = np.sin(arg)
@@ -633,8 +577,6 @@ def demodulate(s_t: np.ndarray, scheme: str, params: SimParams, **kwargs) -> Tup
         Q_levels = Q_ints * norm / den
         
         if axis_levels == 2:
-            # 2-level ASK per axis (-1, 1)
-            # 0 -> -1, 1 -> 1
             I_dec = np.where(I_levels >= 0, 1.0, -1.0)
             Q_dec = np.where(Q_levels >= 0, 1.0, -1.0)
             
@@ -644,30 +586,18 @@ def demodulate(s_t: np.ndarray, scheme: str, params: SimParams, **kwargs) -> Tup
             bits_out = np.column_stack((bI, bQ)).flatten()
             
         else:
-            # 16-QAM (-3, -1, 1, 3)
             lut = np.array([-3.0, -1.0, 1.0, 3.0])
             I_dec = _nearest_level_vec(I_levels, lut)
             Q_dec = _nearest_level_vec(Q_levels, lut)
             
-            # Inverse map:
-            # -3->(0,0), -1->(0,1), 1->(1,1), 3->(1,0)
-            # Let's map levels to indices 0..3
-            # value -> index: (-3->0, -1->1, 1->2, 3->3)
-            # formula: index = (val + 3) / 2
             I_idx = ((I_dec + 3) / 2).astype(int)
             Q_idx = ((Q_dec + 3) / 2).astype(int)
             
-            # Map index to 2 bits
-            # 0->00, 1->01, 2->11, 3->10
-            # Table: [0, 0], [0, 1], [1, 1], [1, 0]
             bit_lut = np.array([[0,0], [0,1], [1,1], [1,0]])
             
-            bI = bit_lut[I_idx] # (N, 2)
-            bQ = bit_lut[Q_idx] # (N, 2)
+            bI = bit_lut[I_idx]
+            bQ = bit_lut[Q_idx]
             
-            # Stack: I0, Q0, I1, Q1
-            # Concatenate cols 0, then cols 1? No.
-            # Output order: bI[0], bQ[0], bI[1], bQ[1]
             bits_out = np.column_stack((bI[:,0], bQ[:,0], bI[:,1], bQ[:,1])).flatten()
 
         meta.update({
@@ -681,7 +611,6 @@ def demodulate(s_t: np.ndarray, scheme: str, params: SimParams, **kwargs) -> Tup
         return bits_out.tolist(), meta
 
     if scheme == "16QAM":
-        # Same logic as above but explicit
         Ns_sym = 4 * Ns
         num_sym = len(s_t) // Ns_sym
         norm = 3.0
