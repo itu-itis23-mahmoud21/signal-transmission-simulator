@@ -57,12 +57,17 @@
 #
 # How to run
 # ----------
-# Set the environment variable `TEST_TARGET` to either `original` or `optimized` to select
-# which implementation to test. If not set, defaults to `original`.
-#  - Example (Linux/Mac):
-#      TEST_TARGET=optimized pytest -v comm_sim/tests/test_d2d.py
-#  - Example (Windows CMD):
-#      set TEST_TARGET=optimized&& pytest -v comm_sim/tests/test_d2d.py
+# Set the environment variable `TEST_TARGET` to `gemini_optimized`, `GPT_optimized`, 
+# or `original` to select which implementation to test. If not set, defaults to `original`.
+#
+# 1) Gemini Optimized:
+#    $env:TEST_TARGET="gemini_optimized"; pytest -q -s comm_sim/tests/test_d2d.py
+#
+# 2) GPT Optimized:
+#    $env:TEST_TARGET="GPT_optimized"; pytest -q -s comm_sim/tests/test_d2d.py
+#
+# 3) Original (Default):
+#    $env:TEST_TARGET="original"; pytest -q -s comm_sim/tests/test_d2d.py
 
 import os
 import sys
@@ -77,32 +82,46 @@ from utils import SimParams
 # ==========================================
 # Dynamic Import Logic (Environment Switch)
 # ==========================================
+# Options: "gemini_optimized", "GPT_optimized", "original" (default)
 test_target = os.getenv("TEST_TARGET", "original")
 
-if test_target == "optimized":
-    # 1. Resolve path relative to THIS test file
-    current_test_dir = os.path.dirname(os.path.abspath(__file__))     # .../comm_sim/tests
-    project_root = os.path.dirname(current_test_dir)                  # .../comm_sim
-    optimized_folder = os.path.join(project_root, "gemini_optimized") # .../comm_sim/gemini_optimized
+# Helper: Resolve paths relative to THIS test file
+current_test_dir = os.path.dirname(os.path.abspath(__file__))     # .../comm_sim/tests
+project_root = os.path.dirname(current_test_dir)                  # .../comm_sim
 
-    print(f"\n>>> TARGET MODE: Optimized")
+if test_target == "gemini_optimized":
+    target_folder = os.path.join(project_root, "gemini_optimized")
+    print(f"\n>>> TARGET MODE: Gemini Optimized")
+    print(f">>> Looking for file in: {target_folder}\n")
 
-    # 2. Add to system path
-    if optimized_folder not in sys.path:
-        sys.path.insert(0, optimized_folder)
+    if target_folder not in sys.path:
+        sys.path.insert(0, target_folder)
 
-    # 3. Import with fallback for the typo
     try:
         from d2d_gemini_optimized import simulate_d2d
     except ImportError:
         try:
-            # Fallback for the file on your disk
+            # Fallback for the known filename typo
             from d2d_gemini_optmizied import simulate_d2d
             print(">>> NOTE: Imported 'd2d_gemini_optmizied.py' (detected filename typo on disk)")
         except ImportError as e:
-            sys.exit(f"CRITICAL ERROR: Could not import optimized file.\nChecked path: {optimized_folder}\nError: {e}")
+            sys.exit(f"CRITICAL ERROR: Could not import Gemini optimized file.\nChecked path: {target_folder}\nError: {e}")
+
+elif test_target == "GPT_optimized":
+    target_folder = os.path.join(project_root, "GPT_optimized")
+    print(f"\n>>> TARGET MODE: GPT Optimized")
+    print(f">>> Looking for file in: {target_folder}\n")
+
+    if target_folder not in sys.path:
+        sys.path.insert(0, target_folder)
+
+    try:
+        from d2d_GPT_optimized import simulate_d2d
+    except ImportError as e:
+        sys.exit(f"CRITICAL ERROR: Could not import GPT optimized file.\nChecked path: {target_folder}\nError: {e}")
 
 else:
+    # Default to Original
     print("\n>>> TARGET MODE: Original (d2d.py) <<<\n")
     try:
         from d2d import simulate_d2d
