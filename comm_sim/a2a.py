@@ -5,7 +5,7 @@ from typing import Any, Dict, Tuple
 import numpy as np
 from scipy.signal import hilbert
 
-from utils import SimParams, SimResult, make_time_axis
+from utils import SimParams, SimResult
 from a2d import gen_message
 
 PAD_CYCLES = 10  # number of carrier cycles to reflect-pad/crop (8–12 is a good range)

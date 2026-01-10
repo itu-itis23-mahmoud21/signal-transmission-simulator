@@ -73,13 +73,63 @@ import pytest
 
 from utils import SimParams
 from a2d import gen_message
-from a2a import (
-    PAD_CYCLES,
-    simulate_a2a,
-    am_modulate,
-    fm_modulate,
-    pm_modulate,
-)
+
+
+import os
+import sys
+
+# ==========================================
+# Dynamic Import Logic (Environment Switch)
+# ==========================================
+test_target = os.getenv("TEST_TARGET", "original")
+
+if test_target == "optimized":
+    # 1. Resolve path relative to THIS test file
+    current_test_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(current_test_dir)
+    optimized_folder = os.path.join(project_root, "gemini_optimized")
+
+    print(f"\n>>> TARGET MODE: Optimized")
+
+    # 2. Add to system path
+    if optimized_folder not in sys.path:
+        sys.path.insert(0, optimized_folder)
+
+    # 3. Import from optimized file
+    try:
+        # Import main simulation and constant
+        from a2a_gemini_optimized import PAD_CYCLES, simulate_a2a
+        
+        # Try importing modulation helpers. 
+        # Handle potential naming differences (modulate_am vs am_modulate)
+        try:
+            from a2a_gemini_optimized import am_modulate, fm_modulate, pm_modulate
+        except ImportError:
+            # Fallback: Aliasing if the optimized file uses 'modulate_am' style
+            from a2a_gemini_optimized import (
+                modulate_am as am_modulate,
+                modulate_fm as fm_modulate,
+                modulate_pm as pm_modulate
+            )
+            
+    except ImportError as e:
+        sys.exit(f"CRITICAL ERROR: Could not import optimized file.\nChecked path: {optimized_folder}\nError: {e}")
+
+else:
+    print("\n>>> TARGET MODE: Original (a2a.py) <<<\n")
+    try:
+        from a2a import (
+            PAD_CYCLES,
+            simulate_a2a,
+            am_modulate,
+            fm_modulate,
+            pm_modulate,
+        )
+    except ImportError:
+         sys.exit("CRITICAL ERROR: Could not import 'a2a.py'. Ensure 'comm_sim' is in your Python path.")
+
+# DEBUG: Verify exactly which file is loaded
+print(f"DEBUG: simulate_a2a is loaded from: {simulate_a2a.__code__.co_filename}\n")
 
 
 KINDS = ["sine", "triangle"]
