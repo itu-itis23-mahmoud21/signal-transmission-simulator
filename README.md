@@ -2,6 +2,16 @@
 
 A comprehensive interactive simulator for encoding and modulation techniques, developed to visualize concepts from **Data and Computer Communications**. This tool allows users to generate signals, apply various transmission schemes, and analyze the results through waveforms, step-by-step execution tables, and theoretical explanations.
 
+## 🌐 Live Demo
+
+🚀 **The app is now live!**  
+You can try the simulator directly in your browser here:
+
+👉 **[Signal Transmission Simulator – Live App](https://signal-transmission-simulator.streamlit.app)**
+
+> 💡 **For the best experience:** resize your browser page to **80% zoom**.  
+> The layout and plots are optimized for this scale.
+
 ## 🎓 Academic Context
 
 This simulator was developed as a course assignment for:
