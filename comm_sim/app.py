@@ -2535,7 +2535,7 @@ elif mode == "Digital → Analog":
             # Show the tone set
             freqs = [fc + (2 * (i + 1) - 1 - M) * fd for i in range(M)]
             with st.expander("MFSK tone frequencies"):
-                rows = [{"tone_index": i, "f_i (Hz)": f"{float(f):.2f}"} for i, f in enumerate(freqs)]
+                rows = [{"bits": format(i, f"0{int(L)}b"), "f_i (Hz)": f"{float(f):.2f}"} for i, f in enumerate(freqs)]
                 render_events_table(rows, width=700)
 
             kwargs["L"] = int(L)
@@ -3045,12 +3045,17 @@ elif mode == "Digital → Analog":
                 # MFSK: show freqs and chosen_idx as separate tables
                 if isinstance(mfsk_freqs, list):
                     with st.expander("freqs (tone set)", expanded=True):
-                        rows = [{"tone_index": i, "f_i (Hz)": f"{float(f):.2f}"} for i, f in enumerate(mfsk_freqs)]
+                        L_sym = int(dem.get("L", dem.get("bits_per_symbol", 1)))
+                        rows = [{"bits": format(i, f"0{L_sym}b"), "f_i (Hz)": f"{float(f):.2f}"} for i, f in enumerate(mfsk_freqs)]
                         render_events_table(rows, width=900)
 
                 if isinstance(mfsk_chosen, list):
                     with st.expander("chosen_idx (detected tone index per symbol)", expanded=True):
-                        rows = [{"symbol_index": i, "chosen_idx": int(idx)} for i, idx in enumerate(mfsk_chosen)]
+                        L_sym = int(dem.get("L", dem.get("bits_per_symbol", 1)))
+                        rows = [
+                            {"symbol_index": i, "bits": format(int(idx), f"0{L_sym}b")}
+                            for i, idx in enumerate(mfsk_chosen)
+                        ]
                         render_events_table(rows, width=900)
 
                 # --- Combined I/Q tables: hat vs dec (only when both exist) ---
